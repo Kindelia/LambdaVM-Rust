@@ -315,7 +315,13 @@ $
   ],
   [
     #smallcaps[(#strong[swit]ch 2)]
-    #math.frac(`#n+1 ~ ?(A B)`, `A ~ (* (#n B))`)
+    #math.frac(
+      `#n+1 ~ ?(A B)`, 
+      ```
+      A ~ (* x)
+      #n ~ ?(x B)
+      ```
+    )
   ],
 )
 #v(2em)
