@@ -899,7 +899,7 @@ parallelism, ensuring that every work that *can* be done in parallel *will* be
 done in parallel. In other words, it maximizes the theoretical speedup, per
 Amdahl's law. The atomic linking procedure ensures that points of
 synchronization that emerge from the original program are solved safely and
-efficiently, without no room for race conditions. Finally, the strong confluence
+efficiently, without any room for race conditions. Finally, the strong confluence
 property ensures that the total work done is independent of the order that
 redexes are computed, giving us freedom to evaluate in parallel without
 generating extra work.
