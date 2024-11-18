@@ -15,11 +15,9 @@ pub enum Tree {
   Var { nam: String },
   Ref { nam: String },
   Era,
-  Num { val: Numb },
-  Con { fst: Box<Tree>, snd: Box<Tree> },
+  Lam { fst: Box<Tree>, snd: Box<Tree> },
+  App { fst: Box<Tree>, snd: Box<Tree> },
   Dup { fst: Box<Tree>, snd: Box<Tree> },
-  Opr { fst: Box<Tree>, snd: Box<Tree> },
-  Swi { fst: Box<Tree>, snd: Box<Tree> },
 }
 
 pub type Redex = (bool, Tree, Tree);
@@ -42,97 +40,6 @@ pub type ParseResult<T> = std::result::Result<T, ParseError>;
 new_parser!(CoreParser);
 
 impl<'i> CoreParser<'i> {
-
-  pub fn parse_numb_sym(&mut self) -> ParseResult<Numb> {
-    self.consume("[")?;
-
-    // numeric casts
-    if let Some(cast) = match () {
-      _ if self.try_consume("u24") => Some(hvm::TY_U24),
-      _ if self.try_consume("i24") => Some(hvm::TY_I24),
-      _ if self.try_consume("f24") => Some(hvm::TY_F24),
-      _ => None
-    } {
-      // Casts can't be partially applied, so nothing should follow.
-      self.consume("]")?;
-
-      return Ok(Numb(hvm::Numb::new_sym(cast).0));
-    }
-
-    // Parses the symbol
-    let op = hvm::Numb::new_sym(match () {
-      // numeric operations
-      _ if self.try_consume("+")   => hvm::OP_ADD,
-      _ if self.try_consume("-")   => hvm::OP_SUB,
-      _ if self.try_consume(":-")  => hvm::FP_SUB,
-      _ if self.try_consume("*")   => hvm::OP_MUL,
-      _ if self.try_consume("/")   => hvm::OP_DIV,
-      _ if self.try_consume(":/")  => hvm::FP_DIV,
-      _ if self.try_consume("%")   => hvm::OP_REM,
-      _ if self.try_consume(":%")  => hvm::FP_REM,
-      _ if self.try_consume("=")   => hvm::OP_EQ,
-      _ if self.try_consume("!")   => hvm::OP_NEQ,
-      _ if self.try_consume("<<")  => hvm::OP_SHL,
-      _ if self.try_consume(":<<") => hvm::FP_SHL,
-      _ if self.try_consume(">>")  => hvm::OP_SHR,
-      _ if self.try_consume(":>>") => hvm::FP_SHR,
-      _ if self.try_consume("<")   => hvm::OP_LT,
-      _ if self.try_consume(">")   => hvm::OP_GT,
-      _ if self.try_consume("&")   => hvm::OP_AND,
-      _ if self.try_consume("|")   => hvm::OP_OR,
-      _ if self.try_consume("^")   => hvm::OP_XOR,
-      _ => self.expected("operator symbol")?,
-    });
-
-    self.skip_trivia();
-    // Syntax for partial operations, like `[*2]`
-    let num = if self.peek_one() != Some(']') {
-      hvm::Numb::partial(op, hvm::Numb(self.parse_numb_lit()?.0))
-    } else {
-      op
-    };
-
-    // Closes symbol bracket
-    self.consume("]")?;
-
-    // Returns the symbol
-    return Ok(Numb(num.0));
-  }
-
-  pub fn parse_numb_lit(&mut self) -> ParseResult<Numb> {
-    let ini = self.index;
-    let num = self.take_while(|x| x.is_alphanumeric() || x == '+' || x == '-' || x == '.');
-    let mut num_parser = CoreParser::new(num);
-    let end = self.index;
-    Ok(Numb(if num.contains('.') || num.contains("inf") || num.contains("NaN") {
-      let val: f32 = num.parse()
-        .map_err(|err| {
-          let msg = format!("invalid number literal: {}\n{}", err, highlight_error(ini, end, self.input));
-          self.expected_and::<Numb>("number literal", &msg).unwrap_err()
-        })?;
-      hvm::Numb::new_f24(val)
-    } else if num.starts_with('+') || num.starts_with('-') {
-      *num_parser.index() += 1;
-      let val = num_parser.parse_u64()? as i32;
-      hvm::Numb::new_i24(if num.starts_with('-') { -val } else { val })
-    } else {
-      let val = num_parser.parse_u64()? as u32;
-      hvm::Numb::new_u24(val)
-    }.0))
-  }
-
-  pub fn parse_numb(&mut self) -> ParseResult<Numb> {
-    self.skip_trivia();
-
-    // Parses symbols (SYM)
-    if let Some('[') = self.peek_one() {
-      return self.parse_numb_sym();
-    // Parses numbers (U24,I24,F24)
-    } else {
-      return self.parse_numb_lit();
-    }
-  }
-
   pub fn parse_tree(&mut self) -> ParseResult<Tree> {
     self.skip_trivia();
     //println!("aaa ||{}", &self.input[self.index..]);
@@ -143,7 +50,7 @@ impl<'i> CoreParser<'i> {
         self.skip_trivia();
         let snd = Box::new(self.parse_tree()?);
         self.consume(")")?;
-        Ok(Tree::Con { fst, snd })
+        Ok(Tree::Lam { fst, snd })
       }
       Some('{') => {
         self.advance_one();
@@ -153,23 +60,14 @@ impl<'i> CoreParser<'i> {
         self.consume("}")?;
         Ok(Tree::Dup { fst, snd })
       }
-      Some('$') => {
+      Some('!') => {
         self.advance_one();
         self.consume("(")?;
         let fst = Box::new(self.parse_tree()?);
         self.skip_trivia();
         let snd = Box::new(self.parse_tree()?);
         self.consume(")")?;
-        Ok(Tree::Opr { fst, snd })
-      }
-      Some('?') => {
-        self.advance_one();
-        self.consume("(")?;
-        let fst = Box::new(self.parse_tree()?);
-        self.skip_trivia();
-        let snd = Box::new(self.parse_tree()?);
-        self.consume(")")?;
-        Ok(Tree::Swi { fst, snd })
+        Ok(Tree::App { fst, snd })
       }
       Some('@') => {
         self.advance_one();
@@ -181,11 +79,6 @@ impl<'i> CoreParser<'i> {
         Ok(Tree::Era)
       }
       _ => {
-        if let Some(c) = self.peek_one() {
-          if "0123456789+-[".contains(c) {
-            return Ok(Tree::Num { val: self.parse_numb()? });
-          }
-        }
         let nam = self.parse_name()?;
         Ok(Tree::Var { nam })
       }
@@ -198,11 +91,10 @@ impl<'i> CoreParser<'i> {
     self.skip_trivia();
     while self.peek_one() == Some('&') {
       self.consume("&")?;
-      let par = if let Some('!') = self.peek_one() { self.consume("!")?; true } else { false };
       let fst = self.parse_tree()?;
       self.consume("~")?;
       let snd = self.parse_tree()?;
-      rbag.push((par,fst,snd));
+      rbag.push((false,fst,snd));
       self.skip_trivia();
     }
     Ok(Net { root, rbag })
@@ -232,100 +124,15 @@ impl<'i> CoreParser<'i> {
 // Stringifier
 // -----------
 
-impl Numb {
-  pub fn show(&self) -> String {
-    let numb = hvm::Numb(self.0);
-    match numb.get_typ() {
-      hvm::TY_SYM => match numb.get_sym() as hvm::Tag {
-        // casts
-        hvm::TY_U24 => "[u24]".to_string(),
-        hvm::TY_I24 => "[i24]".to_string(),
-        hvm::TY_F24 => "[f24]".to_string(),
-        // operations
-        hvm::OP_ADD => "[+]".to_string(),
-        hvm::OP_SUB => "[-]".to_string(),
-        hvm::FP_SUB => "[:-]".to_string(),
-        hvm::OP_MUL => "[*]".to_string(),
-        hvm::OP_DIV => "[/]".to_string(),
-        hvm::FP_DIV => "[:/]".to_string(),
-        hvm::OP_REM => "[%]".to_string(),
-        hvm::FP_REM => "[:%]".to_string(),
-        hvm::OP_EQ  => "[=]".to_string(),
-        hvm::OP_NEQ => "[!]".to_string(),
-        hvm::OP_LT  => "[<]".to_string(),
-        hvm::OP_GT  => "[>]".to_string(),
-        hvm::OP_AND => "[&]".to_string(),
-        hvm::OP_OR  => "[|]".to_string(),
-        hvm::OP_XOR => "[^]".to_string(),
-        hvm::OP_SHL => "[<<]".to_string(),
-        hvm::FP_SHL => "[:<<]".to_string(),
-        hvm::OP_SHR => "[>>]".to_string(),
-        hvm::FP_SHR => "[:>>]".to_string(),
-        _           => "[?]".to_string(),
-      }
-      hvm::TY_U24 => {
-        let val = numb.get_u24();
-        format!("{}", val)
-      }
-      hvm::TY_I24 => {
-        let val = numb.get_i24();
-        format!("{:+}", val)
-      }
-      hvm::TY_F24 => {
-        let val = numb.get_f24();
-        if val.is_infinite() {
-          if val.is_sign_positive() {
-            format!("+inf")
-          } else {
-            format!("-inf")
-          }
-        } else if val.is_nan() {
-          format!("+NaN")
-        } else {
-          format!("{:?}", val)
-        }
-      }
-      _ => {
-        let typ = numb.get_typ();
-        let val = numb.get_u24();
-        format!("[{}0x{:07X}]", match typ {
-          hvm::OP_ADD => "+",
-          hvm::OP_SUB => "-",
-          hvm::FP_SUB => ":-",
-          hvm::OP_MUL => "*",
-          hvm::OP_DIV => "/",
-          hvm::FP_DIV => ":/",
-          hvm::OP_REM => "%",
-          hvm::FP_REM => ":%",
-          hvm::OP_EQ  => "=",
-          hvm::OP_NEQ => "!",
-          hvm::OP_LT  => "<",
-          hvm::OP_GT  => ">",
-          hvm::OP_AND => "&",
-          hvm::OP_OR  => "|",
-          hvm::OP_XOR => "^",
-          hvm::OP_SHL => "<<",
-          hvm::FP_SHL => ":<<",
-          hvm::OP_SHR => ">>",
-          hvm::FP_SHR => ":>>",
-          _           => "?",
-        }, val)
-      }
-    }
-  }
-}
-
 impl Tree {
   pub fn show(&self) -> String {
     match self {
       Tree::Var { nam } => nam.to_string(),
       Tree::Ref { nam } => format!("@{}", nam),
       Tree::Era => "*".to_string(),
-      Tree::Num { val } => format!("{}", val.show()),
-      Tree::Con { fst, snd } => format!("({} {})", fst.show(), snd.show()),
+      Tree::Lam { fst, snd } => format!("({} {})", fst.show(), snd.show()),
+      Tree::App { fst, snd } => format!("!({} {})", fst.show(), snd.show()),
       Tree::Dup { fst, snd } => format!("{{{} {}}}", fst.show(), snd.show()),
-      Tree::Opr { fst, snd } => format!("$({} {})", fst.show(), snd.show()),
-      Tree::Swi { fst, snd } => format!("?({} {})", fst.show(), snd.show()),
     }
   }
 }
@@ -379,32 +186,23 @@ impl Tree {
       hvm::ERA => {
         return Some(Tree::Era);
       }
-      hvm::NUM => {
-        return Some(Tree::Num { val: Numb(port.get_val()) });
-      }
-      hvm::CON => {
+      hvm::LAM => {
         let pair = net.node_load(port.get_val() as usize);
         let fst = Tree::readback(net, pair.get_fst(), fids)?;
         let snd = Tree::readback(net, pair.get_snd(), fids)?;
-        return Some(Tree::Con { fst: Box::new(fst), snd: Box::new(snd) });
+        return Some(Tree::Lam { fst: Box::new(fst), snd: Box::new(snd) });
+      }
+      hvm::APP => {
+        let pair = net.node_load(port.get_val() as usize);
+        let fst = Tree::readback(net, pair.get_fst(), fids)?;
+        let snd = Tree::readback(net, pair.get_snd(), fids)?;
+        return Some(Tree::App { fst: Box::new(fst), snd: Box::new(snd) });
       }
       hvm::DUP => {
         let pair = net.node_load(port.get_val() as usize);
         let fst = Tree::readback(net, pair.get_fst(), fids)?;
         let snd = Tree::readback(net, pair.get_snd(), fids)?;
         return Some(Tree::Dup { fst: Box::new(fst), snd: Box::new(snd) });
-      }
-      hvm::OPR => {
-        let pair = net.node_load(port.get_val() as usize);
-        let fst = Tree::readback(net, pair.get_fst(), fids)?;
-        let snd = Tree::readback(net, pair.get_snd(), fids)?;
-        return Some(Tree::Opr { fst: Box::new(fst), snd: Box::new(snd) });
-      }
-      hvm::SWI => {
-        let pair = net.node_load(port.get_val() as usize);
-        let fst = Tree::readback(net, pair.get_fst(), fids)?;
-        let snd = Tree::readback(net, pair.get_snd(), fids)?;
-        return Some(Tree::Swi { fst: Box::new(fst), snd: Box::new(snd) });
       }
       _ => {
         unreachable!()
@@ -449,16 +247,21 @@ impl Tree {
       Tree::Era => {
         return hvm::Port::new(hvm::ERA, 0);
       }
-      Tree::Num { val } => {
-        return hvm::Port::new(hvm::NUM, val.0);
-      }
-      Tree::Con { fst, snd } => {
+      Tree::Lam { fst, snd } => {
         let index = def.node.len();
         def.node.push(hvm::Pair(0));
         let p1 = fst.build(def, fids, vars);
         let p2 = snd.build(def, fids, vars);
         def.node[index] = hvm::Pair::new(p1, p2);
-        return hvm::Port::new(hvm::CON, index as hvm::Val);
+        return hvm::Port::new(hvm::LAM, index as hvm::Val);
+      }
+      Tree::App { fst, snd } => {
+        let index = def.node.len();
+        def.node.push(hvm::Pair(0));
+        let p1 = fst.build(def, fids, vars);
+        let p2 = snd.build(def, fids, vars);
+        def.node[index] = hvm::Pair::new(p1, p2);
+        return hvm::Port::new(hvm::APP, index as hvm::Val);
       }
       Tree::Dup { fst, snd } => {
         def.safe = false;
@@ -468,22 +271,6 @@ impl Tree {
         let p2 = snd.build(def, fids, vars);
         def.node[index] = hvm::Pair::new(p1, p2);
         return hvm::Port::new(hvm::DUP, index as hvm::Val);
-      },
-      Tree::Opr { fst, snd } => {
-        let index = def.node.len();
-        def.node.push(hvm::Pair(0));
-        let p1 = fst.build(def, fids, vars);
-        let p2 = snd.build(def, fids, vars);
-        def.node[index] = hvm::Pair::new(p1, p2);
-        return hvm::Port::new(hvm::OPR, index as hvm::Val);
-      },
-      Tree::Swi { fst, snd } => {
-        let index = def.node.len();
-        def.node.push(hvm::Pair(0));
-        let p1 = fst.build(def, fids, vars);
-        let p2 = snd.build(def, fids, vars);
-        def.node[index] = hvm::Pair::new(p1, p2);
-        return hvm::Port::new(hvm::SWI, index as hvm::Val);
       },
     }
   }
@@ -495,11 +282,9 @@ impl Tree {
     while let Some(curr) = stack.pop() {
       match curr {
         Tree::Ref { nam } => { acc.insert(nam); },
-        Tree::Con { fst, snd } => { stack.push(fst); stack.push(snd); },
+        Tree::Lam { fst, snd } => { stack.push(fst); stack.push(snd); },
+        Tree::App { fst, snd } => { stack.push(fst); stack.push(snd); },
         Tree::Dup { fst, snd } => { stack.push(fst); stack.push(snd); },
-        Tree::Opr { fst, snd } => { stack.push(fst); stack.push(snd); },
-        Tree::Swi { fst, snd } => { stack.push(fst); stack.push(snd); },
-        Tree::Num { val } => {},
         Tree::Var { nam } => {},
         Tree::Era => {},
       };
@@ -518,7 +303,6 @@ impl Net {
       let p1 = fst.build(def, fids, vars);
       let p2 = snd.build(def, fids, vars);
       let rx = hvm::Pair::new(p1, p2);
-      let rx = if *par { rx.set_par_flag() } else { rx };
       def.rbag[index] = rx;
     }
   }

@@ -46,8 +46,8 @@ typedef _Atomic(u64) a64;
 // -----
 
 // Local Types
-typedef u8  Tag;  // Tag  ::= 3-bit (rounded up to u8)
-typedef u32 Val;  // Val  ::= 29-bit (rounded up to u32)
+typedef u8  Tag;  // Tag  ::= 4-bit (rounded up to u8)
+typedef u32 Val;  // Val  ::= 28-bit (rounded up to u32)
 typedef u32 Port; // Port ::= Tag + Val (fits a u32)
 typedef u64 Pair; // Pair ::= Port + Port (fits a u64)
 
@@ -61,58 +61,53 @@ typedef u8 Rule; // Rule ::= 3-bit (rounded up to 8)
 typedef u32 Numb; // Numb ::= 29-bit (rounded up to u32)
 
 // Tags
+//#define VAR 0x0 // variable
+//#define REF 0x1 // reference
+//#define ERA 0x2 // eraser
+//#define NUM 0x3 // number
+//#define CON 0x4 // constructor
+//#define DUP 0x5 // duplicator
+//#define OPR 0x6 // operator
+//#define SWI 0x7 // switch
+
 #define VAR 0x0 // variable
 #define REF 0x1 // reference
 #define ERA 0x2 // eraser
-#define NUM 0x3 // number
-#define CON 0x4 // constructor
+#define LAM 0x3 // lambda
+#define APP 0x4 // application
 #define DUP 0x5 // duplicator
-#define OPR 0x6 // operator
-#define SWI 0x7 // switch
+//#define EVL 0x6 // eval
+//#define CAL 0x7 // call
+//#define WAI 0x8 // wait
+//#define HLD 0x9 // hold
+//#define DCD 0xA // decide
+//#define AMB 0xB // amb
 
 // Interaction Rule Values
+//#define LINK 0x0
+//#define CALL 0x1
+//#define VOID 0x2
+//#define ERAS 0x3
+//#define ANNI 0x4
+//#define COMM 0x5
+//#define OPER 0x6
+//#define SWIT 0x7
+
 #define LINK 0x0
 #define CALL 0x1
 #define VOID 0x2
 #define ERAS 0x3
 #define ANNI 0x4
 #define COMM 0x5
-#define OPER 0x6
-#define SWIT 0x7
-
-// Numbers
-static const f32 U24_MAX = (f32) (1 << 24) - 1;
-static const f32 U24_MIN = 0.0;
-static const f32 I24_MAX = (f32) (1 << 23) - 1;
-static const f32 I24_MIN = (f32) (i32) ((-1u) << 23);
-#define TY_SYM 0x00
-#define TY_U24 0x01
-#define TY_I24 0x02
-#define TY_F24 0x03
-#define OP_ADD 0x04
-#define OP_SUB 0x05
-#define FP_SUB 0x06
-#define OP_MUL 0x07
-#define OP_DIV 0x08
-#define FP_DIV 0x09
-#define OP_REM 0x0A
-#define FP_REM 0x0B
-#define OP_EQ  0x0C
-#define OP_NEQ 0x0D
-#define OP_LT  0x0E
-#define OP_GT  0x0F
-#define OP_AND 0x10
-#define OP_OR  0x11
-#define OP_XOR 0x12
-#define OP_SHL 0x13
-#define FP_SHL 0x14
-#define OP_SHR 0x15
-#define FP_SHR 0x16
 
 // Constants
+#define TAG_LEN (4)
+#define VAL_LEN (28)
+#define TAG_MASK (0b1111)
+
 #define FREE 0x00000000
-#define ROOT 0xFFFFFFF8
 #define NONE 0xFFFFFFFF
+#define ROOT ((NONE << TAG_LEN) | LINK)
 
 // Cache Padding
 #define CACHE_PAD 64
@@ -120,8 +115,8 @@ static const f32 I24_MIN = (f32) (i32) ((-1u) << 23);
 // Global Net
 #define HLEN (1ul << 16) // max 16k high-priority redexes
 #define RLEN (1ul << 24) // max 16m low-priority redexes
-#define G_NODE_LEN (1ul << 29) // max 536m nodes
-#define G_VARS_LEN (1ul << 29) // max 536m vars
+#define G_NODE_LEN (1ul << VAL_LEN) // max 536m nodes
+#define G_VARS_LEN (1ul << VAL_LEN) // max 536m vars
 #define G_RBAG_LEN (TPC * RLEN)
 
 typedef struct Net {
@@ -177,33 +172,19 @@ typedef struct TM {
   Pair hbag_buf[HLEN]; // high-priority redexes
 } TM;
 
-// Debugger
-// --------
-
-typedef struct {
-  char x[13];
-} Show;
-
-void put_u16(char* B, u16 val);
-Show show_port(Port port);
-Show show_rule(Rule rule);
-void print_net(Net* net);
-void pretty_print_numb(Numb word);
-void pretty_print_port(Net* net, Book* book, Port port);
-
 // Port: Constructor and Getters
 // -----------------------------
 
 static inline Port new_port(Tag tag, Val val) {
-  return (val << 3) | tag;
+  return (val << TAG_LEN) | tag;
 }
 
 static inline Tag get_tag(Port port) {
-  return port & 7;
+  return port & TAG_MASK;
 }
 
 static inline Val get_val(Port port) {
-  return port >> 3;
+  return port >> TAG_LEN;
 }
 
 // Pair: Constructor and Getters
@@ -219,35 +200,6 @@ static inline Port get_fst(Pair pair) {
 
 static inline Port get_snd(Pair pair) {
   return pair >> 32;
-}
-
-Pair set_par_flag(Pair pair) {
-  Port p1 = get_fst(pair);
-  Port p2 = get_snd(pair);
-  if (get_tag(p1) == REF) {
-    return new_pair(new_port(get_tag(p1), get_val(p1) | 0x10000000), p2);
-  } else {
-    return pair;
-  }
-}
-
-Pair clr_par_flag(Pair pair) {
-  Port p1 = get_fst(pair);
-  Port p2 = get_snd(pair);
-  if (get_tag(p1) == REF) {
-    return new_pair(new_port(get_tag(p1), get_val(p1) & 0xFFFFFFF), p2);
-  } else {
-    return pair;
-  }
-}
-
-bool get_par_flag(Pair pair) {
-  Port p1 = get_fst(pair);
-  if (get_tag(p1) == REF) {
-    return (get_val(p1) >> 28) == 1;
-  } else {
-    return false;
-  }
 }
 
 // Utils
@@ -307,7 +259,7 @@ static inline u64 time64() {
 
 // True if this port has a pointer to a node.
 static inline bool is_nod(Port a) {
-  return get_tag(a) >= CON;
+  return get_tag(a) >= LAM;
 }
 
 // True if this port is a variable.
@@ -317,16 +269,25 @@ static inline bool is_var(Port a) {
 
 // Given two tags, gets their interaction rule.
 static inline Rule get_rule(Port a, Port b) {
-  const u8 table[8][8] = {
-    //VAR  REF  ERA  NUM  CON  DUP  OPR  SWI
-    {LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK}, // VAR
-    {LINK,VOID,VOID,VOID,CALL,CALL,CALL,CALL}, // REF
-    {LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS}, // ERA
-    {LINK,VOID,VOID,VOID,ERAS,ERAS,OPER,SWIT}, // NUM
-    {LINK,CALL,ERAS,ERAS,ANNI,COMM,COMM,COMM}, // CON
-    {LINK,CALL,ERAS,ERAS,COMM,ANNI,COMM,COMM}, // DUP
-    {LINK,CALL,ERAS,OPER,COMM,COMM,ANNI,COMM}, // OPR
-    {LINK,CALL,ERAS,SWIT,COMM,COMM,COMM,ANNI}, // SWI
+  //const u8 table[8][8] = {
+  //  //VAR  REF  ERA  NUM  CON  DUP  OPR  SWI
+  //  {LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK}, // VAR
+  //  {LINK,VOID,VOID,VOID,CALL,CALL,CALL,CALL}, // REF
+  //  {LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS}, // ERA
+  //  {LINK,VOID,VOID,VOID,ERAS,ERAS,OPER,SWIT}, // NUM
+  //  {LINK,CALL,ERAS,ERAS,ANNI,COMM,COMM,COMM}, // CON
+  //  {LINK,CALL,ERAS,ERAS,COMM,ANNI,COMM,COMM}, // DUP
+  //  {LINK,CALL,ERAS,OPER,COMM,COMM,ANNI,COMM}, // OPR
+  //  {LINK,CALL,ERAS,SWIT,COMM,COMM,COMM,ANNI}, // SWI
+  //};
+  const u8 table[6][6] = {
+    //VAR  REF  ERA  LAM, APP  DUP
+    {LINK,LINK,LINK,LINK,LINK,LINK}, // VAR
+    {LINK,VOID,VOID,CALL,CALL,CALL}, // REF
+    {LINK,VOID,VOID,ERAS,ERAS,ERAS}, // ERA
+    {LINK,CALL,ERAS,ANNI,ANNI,COMM}, // LAM
+    {LINK,CALL,ERAS,ANNI,ANNI,COMM}, // APP
+    {LINK,CALL,ERAS,COMM,COMM,ANNI}, // DUP
   };
   return table[get_tag(a)][get_tag(b)];
 }
@@ -344,7 +305,17 @@ static inline bool should_swap(Port A, Port B) {
 // Gets a rule's priority
 static inline bool is_high_priority(Rule rule) {
   // TODO: this needs to be more readable
-  return (bool)((0b00011101 >> rule) & 1);
+  switch (rule) {
+    case COMM:
+    case CALL:
+      return false;
+    case LINK:
+    case VOID:
+    case ERAS:
+    case ANNI:
+    default:
+      return true;
+  }
 }
 
 // Adjusts a newly allocated port.
@@ -361,224 +332,6 @@ static inline Pair adjust_pair(Net* net, TM* tm, Pair pair) {
   Port p1 = adjust_port(net, tm, get_fst(pair));
   Port p2 = adjust_port(net, tm, get_snd(pair));
   return new_pair(p1, p2);
-}
-
-// Numbs
-// -----
-
-// Constructor and getters for SYM (operation selector)
-static inline Numb new_sym(u32 val) {
-  return (val << 5) | TY_SYM;
-}
-
-static inline u32 get_sym(Numb word) {
-  return (word >> 5);
-}
-
-// Constructor and getters for U24 (unsigned 24-bit integer)
-static inline Numb new_u24(u32 val) {
-  return (val << 5) | TY_U24;
-}
-
-static inline u32 get_u24(Numb word) {
-  return word >> 5;
-}
-
-// Constructor and getters for I24 (signed 24-bit integer)
-static inline Numb new_i24(i32 val) {
-  return ((u32)val << 5) | TY_I24;
-}
-
-static inline i32 get_i24(Numb word) {
-  return ((i32)word) << 3 >> 8;
-}
-
-// Constructor and getters for F24 (24-bit float)
-static inline Numb new_f24(float val) {
-  u32 bits = *(u32*)&val;
-  u32 shifted_bits = bits >> 8;
-  u32 lost_bits = bits & 0xFF;
-  // round ties to even
-  shifted_bits += (!isnan(val)) & ((lost_bits - ((lost_bits >> 7) & !shifted_bits)) >> 7);
-  // ensure NaNs don't become infinities
-  shifted_bits |= isnan(val);
-  return (shifted_bits << 5) | TY_F24;
-}
-
-static inline float get_f24(Numb word) {
-  u32 bits = (word << 3) & 0xFFFFFF00;
-  return *(float*)&bits;
-}
-
-// Flip flag
-static inline Tag get_typ(Numb word) {
-  return word & 0x1F;
-}
-
-static inline bool is_num(Numb word) {
-  return get_typ(word) >= TY_U24 && get_typ(word) <= TY_F24;
-}
-
-static inline bool is_cast(Numb word) {
-  return get_typ(word) == TY_SYM && get_sym(word) >= TY_U24 && get_sym(word) <= TY_F24;
-}
-
-// Partial application
-static inline Numb partial(Numb a, Numb b) {
-  return (b & ~0x1F) | get_sym(a);
-}
-
-// Cast a number to another type.
-// The semantics are meant to spiritually resemble rust's numeric casts:
-// - i24 <-> u24: is just reinterpretation of bits
-// - f24  -> i24,
-//   f24  -> u24: casts to the "closest" integer representing this float,
-//                saturating if out of range and 0 if NaN
-// - i24  -> f24,
-//   u24  -> f24: casts to the "closest" float representing this integer.
-static inline Numb cast(Numb a, Numb b) {
-  if (get_sym(a) == TY_U24 && get_typ(b) == TY_U24) return b;
-  if (get_sym(a) == TY_U24 && get_typ(b) == TY_I24) {
-    // reinterpret bits
-    i32 val = get_i24(b);
-    return new_u24(*(u32*) &val);
-  }
-  if (get_sym(a) == TY_U24 && get_typ(b) == TY_F24) {
-    f32 val = get_f24(b);
-    if (isnan(val)) {
-      return new_u24(0);
-    }
-    return new_u24((u32) clamp(val, U24_MIN, U24_MAX));
-  }
-
-  if (get_sym(a) == TY_I24 && get_typ(b) == TY_U24) {
-    // reinterpret bits
-    u32 val = get_u24(b);
-    return new_i24(*(i32*) &val);
-  }
-  if (get_sym(a) == TY_I24 && get_typ(b) == TY_I24) return b;
-  if (get_sym(a) == TY_I24 && get_typ(b) == TY_F24) {
-    f32 val = get_f24(b);
-    if (isnan(val)) {
-      return new_i24(0);
-    }
-    return new_i24((i32) clamp(val, I24_MIN, I24_MAX));
-  }
-
-  if (get_sym(a) == TY_F24 && get_typ(b) == TY_U24) return new_f24((f32) get_u24(b));
-  if (get_sym(a) == TY_F24 && get_typ(b) == TY_I24) return new_f24((f32) get_i24(b));
-  if (get_sym(a) == TY_F24 && get_typ(b) == TY_F24) return b;
-
-  return new_u24(0);
-}
-
-// Operate function
-static inline Numb operate(Numb a, Numb b) {
-  Tag at = get_typ(a);
-  Tag bt = get_typ(b);
-  if (at == TY_SYM && bt == TY_SYM) {
-    return new_u24(0);
-  }
-  if (is_cast(a) && is_num(b)) {
-    return cast(a, b);
-  }
-  if (is_cast(b) && is_num(a)) {
-    return cast(b, a);
-  }
-  if (at == TY_SYM && bt != TY_SYM) {
-    return partial(a, b);
-  }
-  if (at != TY_SYM && bt == TY_SYM) {
-    return partial(b, a);
-  }
-  if (at >= OP_ADD && bt >= OP_ADD) {
-    return new_u24(0);
-  }
-  if (at < OP_ADD && bt < OP_ADD) {
-    return new_u24(0);
-  }
-  Tag op, ty;
-  Numb swp;
-  if (at >= OP_ADD) {
-    op = at; ty = bt;
-  } else {
-    op = bt; ty = at; swp = a; a = b; b = swp;
-  }
-  switch (ty) {
-    case TY_U24: {
-      u32 av = get_u24(a);
-      u32 bv = get_u24(b);
-      switch (op) {
-        case OP_ADD: return new_u24(av + bv);
-        case OP_SUB: return new_u24(av - bv);
-        case FP_SUB: return new_u24(bv - av);
-        case OP_MUL: return new_u24(av * bv);
-        case OP_DIV: return new_u24(av / bv);
-        case FP_DIV: return new_u24(bv / av);
-        case OP_REM: return new_u24(av % bv);
-        case FP_REM: return new_u24(bv % av);
-        case OP_EQ:  return new_u24(av == bv);
-        case OP_NEQ: return new_u24(av != bv);
-        case OP_LT:  return new_u24(av < bv);
-        case OP_GT:  return new_u24(av > bv);
-        case OP_AND: return new_u24(av & bv);
-        case OP_OR:  return new_u24(av | bv);
-        case OP_XOR: return new_u24(av ^ bv);
-        case OP_SHL: return new_u24(av << (bv & 31));
-        case FP_SHL: return new_u24(bv << (av & 31));
-        case OP_SHR: return new_u24(av >> (bv & 31));
-        case FP_SHR: return new_u24(bv >> (av & 31));
-        default:     return new_u24(0);
-      }
-    }
-    case TY_I24: {
-      i32 av = get_i24(a);
-      i32 bv = get_i24(b);
-      switch (op) {
-        case OP_ADD: return new_i24(av + bv);
-        case OP_SUB: return new_i24(av - bv);
-        case FP_SUB: return new_i24(bv - av);
-        case OP_MUL: return new_i24(av * bv);
-        case OP_DIV: return new_i24(av / bv);
-        case FP_DIV: return new_i24(bv / av);
-        case OP_REM: return new_i24(av % bv);
-        case FP_REM: return new_i24(bv % av);
-        case OP_EQ:  return new_u24(av == bv);
-        case OP_NEQ: return new_u24(av != bv);
-        case OP_LT:  return new_u24(av < bv);
-        case OP_GT:  return new_u24(av > bv);
-        case OP_AND: return new_i24(av & bv);
-        case OP_OR:  return new_i24(av | bv);
-        case OP_XOR: return new_i24(av ^ bv);
-        default:     return new_i24(0);
-      }
-    }
-    case TY_F24: {
-      float av = get_f24(a);
-      float bv = get_f24(b);
-      switch (op) {
-        case OP_ADD: return new_f24(av + bv);
-        case OP_SUB: return new_f24(av - bv);
-        case FP_SUB: return new_f24(bv - av);
-        case OP_MUL: return new_f24(av * bv);
-        case OP_DIV: return new_f24(av / bv);
-        case FP_DIV: return new_f24(bv / av);
-        case OP_REM: return new_f24(fmodf(av, bv));
-        case FP_REM: return new_f24(fmodf(bv, av));
-        case OP_EQ:  return new_u24(av == bv);
-        case OP_NEQ: return new_u24(av != bv);
-        case OP_LT:  return new_u24(av < bv);
-        case OP_GT:  return new_u24(av > bv);
-        case OP_AND: return new_f24(atan2f(av, bv));
-        case OP_OR:  return new_f24(logf(bv) / logf(av));
-        case OP_XOR: return new_f24(powf(av, bv));
-        case OP_SHL: return new_f24(sin(av + bv));
-        case OP_SHR: return new_f24(tan(av + bv));
-        default:     return new_f24(0);
-      }
-    }
-    default: return new_u24(0);
-  }
 }
 
 // RBag
@@ -1005,70 +758,6 @@ static inline bool interact_comm(Net* net, TM* tm, Port a, Port b) {
   return true;
 }
 
-// The Oper Interaction.
-static inline bool interact_oper(Net* net, TM* tm, Port a, Port b) {
-  // Allocates needed nodes and vars.
-  if (!get_resources(net, tm, 1, 1, 0)) {
-    debug("interact_oper: get_resources failed\n");
-    return false;
-  }
-
-  // Checks availability
-  if (node_load(net, get_val(b)) == 0) {
-    return false;
-  }
-
-  // Loads ports.
-  Val  av = get_val(a);
-  Pair B  = node_take(net, get_val(b));
-  Port B1 = get_fst(B);
-  Port B2 = enter(net, get_snd(B));
-
-  // Performs operation.
-  if (get_tag(B1) == NUM) {
-    Val  bv = get_val(B1);
-    Numb cv = operate(av, bv);
-    link_pair(net, tm, new_pair(new_port(NUM, cv), B2));
-  } else {
-    node_create(net, tm->nloc[0], new_pair(a, B2));
-    link_pair(net, tm, new_pair(B1, new_port(OPR, tm->nloc[0])));
-  }
-
-  return true;
-}
-
-// The Swit Interaction.
-static inline bool interact_swit(Net* net, TM* tm, Port a, Port b) {
-  // Allocates needed nodes and vars.
-  if (!get_resources(net, tm, 1, 2, 0)) {
-    debug("interact_swit: get_resources failed\n");
-    return false;
-  }
-
-  // Checks availability
-  if (node_load(net, get_val(b)) == 0) {
-    return false;
-  }
-
-  // Loads ports.
-  u32  av = get_u24(get_val(a));
-  Pair B  = node_take(net, get_val(b));
-  Port B1 = get_fst(B);
-  Port B2 = get_snd(B);
-
-  // Stores new nodes.
-  if (av == 0) {
-    node_create(net, tm->nloc[0], new_pair(B2, new_port(ERA,0)));
-    link_pair(net, tm, new_pair(new_port(CON, tm->nloc[0]), B1));
-  } else {
-    node_create(net, tm->nloc[0], new_pair(new_port(ERA,0), new_port(CON, tm->nloc[1])));
-    node_create(net, tm->nloc[1], new_pair(new_port(NUM, new_u24(av-1)), B2));
-    link_pair(net, tm, new_pair(new_port(CON, tm->nloc[0]), B1));
-  }
-
-  return true;
-}
-
 // Pops a local redex and performs a single interaction.
 static inline bool interact(Net* net, TM* tm, Book* book) {
   // Pops a redex.
@@ -1104,8 +793,6 @@ static inline bool interact(Net* net, TM* tm, Book* book) {
       case ERAS: success = interact_eras(net, tm, a, b); break;
       case ANNI: success = interact_anni(net, tm, a, b); break;
       case COMM: success = interact_comm(net, tm, a, b); break;
-      case OPER: success = interact_oper(net, tm, a, b); break;
-      case SWIT: success = interact_swit(net, tm, a, b); break;
     }
 
     // If error, pushes redex back.
@@ -1242,166 +929,6 @@ Port expand(Net* net, Book* book, Port port) {
   return got;
 }
 
-// Reads back an image.
-// Encoding: (<tree>,<tree>) | #RRGGBB
-void read_img(Net* net, Port port, u32 width, u32 height, u32* buffer) {
-  //pretty_print_port(net, port);
-  //printf("\n");
-  typedef struct {
-    Port port; u32 lv;
-    u32 x0; u32 x1;
-    u32 y0; u32 y1;
-  } Rect;
-  Rect stk[24];
-  u32 pos = 0;
-  stk[pos++] = (Rect){port, 0, 0, width, 0, height};
-  while (pos > 0) {
-    Rect rect = stk[--pos];
-    Port port = enter(net, rect.port);
-    u32  lv   = rect.lv;
-    u32  x0   = rect.x0;
-    u32  x1   = rect.x1;
-    u32  y0   = rect.y0;
-    u32  y1   = rect.y1;
-    if (get_tag(port) == CON) {
-      Pair nd = node_load(net, get_val(port));
-      Port p1 = get_fst(nd);
-      Port p2 = get_snd(nd);
-      u32  xm = (x0 + x1) / 2;
-      u32  ym = (y0 + y1) / 2;
-      if (lv % 2 == 0) {
-        stk[pos++] = (Rect){p2, lv+1, xm, x1, y0, y1};
-        stk[pos++] = (Rect){p1, lv+1, x0, xm, y0, y1};
-      } else {
-        stk[pos++] = (Rect){p2, lv+1, x0, x1, ym, y1};
-        stk[pos++] = (Rect){p1, lv+1, x0, x1, y0, ym};
-      }
-      continue;
-    }
-    if (get_tag(port) == NUM) {
-      u32 color = get_u24(get_val(port));
-      printf("COL=%08x x0=%04u x1=%04u y0=%04u y1=%04u | %s\n", color, x0, x1, y0, y1, show_port(port).x);
-      for (u32 y = y0; y < y1; y++) {
-        for (u32 x = x0; x < x1; x++) {
-          buffer[y*width + x] = 0xFF000000 | color;
-        }
-      }
-      continue;
-    }
-    break;
-  }
-}
-
-
-//#ifdef IO_DRAWIMAGE
-//// Global variables for the window and renderer
-//static SDL_Window *window = NULL;
-//static SDL_Renderer *renderer = NULL;
-//static SDL_Texture *texture = NULL;
-//// Function to close the SDL window and clean up resources
-//void close_sdl(void) {
-  //if (texture != NULL) {
-    //SDL_DestroyTexture(texture);
-    //texture = NULL;
-  //}
-  //if (renderer != NULL) {
-    //SDL_DestroyRenderer(renderer);
-    //renderer = NULL;
-  //}
-  //if (window != NULL) {
-    //SDL_DestroyWindow(window);
-    //window = NULL;
-  //}
-  //SDL_Quit();
-//}
-//// Function to render an image to the SDL window
-//void render(uint32_t width, uint32_t height, uint32_t *buffer) {
-  //// Initialize SDL if it hasn't been initialized
-  //if (SDL_WasInit(SDL_INIT_VIDEO) == 0) {
-    //if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-      //fprintf(stderr, "SDL could not initialize! SDL Error: %s\n", SDL_GetError());
-      //return;
-    //}
-  //}
-  //// Create window and renderer if they don't exist
-  //if (window == NULL) {
-    //window = SDL_CreateWindow("SDL Window", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_SHOWN);
-    //if (window == NULL) {
-      //fprintf(stderr, "Window could not be created! SDL Error: %s\n", SDL_GetError());
-      //return;
-    //}
-    //renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    //if (renderer == NULL) {
-      //SDL_DestroyWindow(window);
-      //window = NULL;
-      //fprintf(stderr, "Renderer could not be created! SDL Error: %s\n", SDL_GetError());
-      //return;
-    //}
-  //}
-  //// Create or recreate the texture if necessary
-  //if (texture == NULL) {
-    //texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
-    //if (texture == NULL) {
-      //fprintf(stderr, "Texture could not be created! SDL Error: %s\n", SDL_GetError());
-      //return;
-    //}
-  //}
-  //// Update the texture with the new buffer
-  //if (SDL_UpdateTexture(texture, NULL, buffer, width * sizeof(uint32_t)) < 0) {
-    //fprintf(stderr, "Texture could not be updated! SDL Error: %s\n", SDL_GetError());
-    //return;
-  //}
-  //// Clear the renderer
-  //SDL_RenderClear(renderer);
-  //// Copy the texture to the renderer
-  //SDL_RenderCopy(renderer, texture, NULL, NULL);
-  //// Update the screen
-  //SDL_RenderPresent(renderer);
-  //// Process events to prevent the OS from thinking the application is unresponsive
-  //SDL_Event e;
-  //while (SDL_PollEvent(&e)) {
-    //if (e.type == SDL_QUIT) {
-      //close_sdl();
-      //exit(0);
-    //}
-  //}
-//}
-//// IO: DrawImage
-//Port io_put_image(Net* net, Book* book, u32 argc, Port* argv) {
-  //u32 width = 256;
-  //u32 height = 256;
-  //// Create a buffer
-  //uint32_t *buffer = (uint32_t *)malloc(width * height * sizeof(uint32_t));
-  //if (buffer == NULL) {
-    //fprintf(stderr, "Failed to allocate memory for buffer\n");
-    //return 1;
-  //}
-  //// Initialize buffer to a dark blue background
-  //for (int i = 0; i < width * height; ++i) {
-    //buffer[i] = 0xFF000030; // Dark blue background
-  //}
-  //// Converts a HVM2 tuple-encoded quadtree to a color buffer
-  //read_img(net, argv[0], width, height, buffer);
-  //// Render the buffer to the screen
-  //render(width, height, buffer);
-  //// Wait some time
-  //SDL_Delay(2000);
-  //// Free the buffer
-  //free(buffer);
-  //return new_port(ERA, 0);
-//}
-//#else
-//// IO: DrawImage
-//Port io_put_image(Net* net, Book* book, u32 argc, Port* argv) {
-  //printf("DRAWIMAGE: disabled.\n");
-  //printf("Image rendering is a WIP. For now, to enable it, you must:\n");
-  //printf("1. Generate a C file, with `hvm gen-c your_file.hvm`.\n");
-  //printf("2. Manually un-comment the '#define IO_DRAWIMAGE' line on it.\n");
-  //printf("3. Have SDL installed and compile it with '-lSDL2'.\n");
-  //return new_port(ERA, 0);
-//}
-//#endif
-
 // Book Loader
 // -----------
 
@@ -1454,167 +981,6 @@ bool book_load(Book* book, u32* buf) {
   return true;
 }
 
-// Debug Printing
-// --------------
-
-void put_u32(char* B, u32 val) {
-  for (int i = 0; i < 8; i++, val >>= 4) {
-    B[8-i-1] = "0123456789ABCDEF"[val & 0xF];
-  }
-}
-
-Show show_port(Port port) {
-  // NOTE: this is done like that because sprintf seems not to be working
-  Show s;
-  switch (get_tag(port)) {
-    case VAR: memcpy(s.x, "VAR:", 4); put_u32(s.x+4, get_val(port)); break;
-    case REF: memcpy(s.x, "REF:", 4); put_u32(s.x+4, get_val(port)); break;
-    case ERA: memcpy(s.x, "ERA:________", 12); break;
-    case NUM: memcpy(s.x, "NUM:", 4); put_u32(s.x+4, get_val(port)); break;
-    case CON: memcpy(s.x, "CON:", 4); put_u32(s.x+4, get_val(port)); break;
-    case DUP: memcpy(s.x, "DUP:", 4); put_u32(s.x+4, get_val(port)); break;
-    case OPR: memcpy(s.x, "OPR:", 4); put_u32(s.x+4, get_val(port)); break;
-    case SWI: memcpy(s.x, "SWI:", 4); put_u32(s.x+4, get_val(port)); break;
-  }
-  s.x[12] = '\0';
-  return s;
-}
-
-Show show_rule(Rule rule) {
-  Show s;
-  switch (rule) {
-    case LINK: memcpy(s.x, "LINK", 4); break;
-    case VOID: memcpy(s.x, "VOID", 4); break;
-    case ERAS: memcpy(s.x, "ERAS", 4); break;
-    case ANNI: memcpy(s.x, "ANNI", 4); break;
-    case COMM: memcpy(s.x, "COMM", 4); break;
-    case OPER: memcpy(s.x, "OPER", 4); break;
-    case SWIT: memcpy(s.x, "SWIT", 4); break;
-    case CALL: memcpy(s.x, "CALL", 4); break;
-    default  : memcpy(s.x, "????", 4); break;
-  }
-  s.x[4] = '\0';
-  return s;
-}
-
-//void print_rbag(RBag* rbag) {
-  //printf("RBAG | FST-TREE     | SND-TREE    \n");
-  //printf("---- | ------------ | ------------\n");
-  //for (u32 i = rbag->lo_ini; i < rbag->lo_end; ++i) {
-    //Pair redex = rbag->lo_buf[i%RLEN];
-    //printf("%04X | %s | %s\n", i, show_port(get_fst(redex)).x, show_port(get_snd(redex)).x);
-  //}
-  //for (u32 i = 0; i > rbag->hi_end; ++i) {
-    //Pair redex = rbag->hi_buf[i];
-    //printf("%04X | %s | %s\n", i, show_port(get_fst(redex)).x, show_port(get_snd(redex)).x);
-  //}
-  //printf("==== | ============ | ============\n");
-//}
-
-void print_net(Net* net) {
-  printf("NODE | PORT-1       | PORT-2      \n");
-  printf("---- | ------------ | ------------\n");
-  for (u32 i = 0; i < G_NODE_LEN; ++i) {
-    Pair node = node_load(net, i);
-    if (node != 0) {
-      printf("%04X | %s | %s\n", i, show_port(get_fst(node)).x, show_port(get_snd(node)).x);
-    }
-  }
-  printf("==== | ============ |\n");
-  printf("VARS | VALUE        |\n");
-  printf("---- | ------------ |\n");
-  for (u32 i = 0; i < G_VARS_LEN; ++i) {
-    Port var = vars_load(net,i);
-    if (var != 0) {
-      printf("%04X | %s |\n", i, show_port(vars_load(net,i)).x);
-    }
-  }
-  printf("==== | ============ |\n");
-}
-
-void pretty_print_numb(Numb word) {
-  switch (get_typ(word)) {
-    case TY_SYM: {
-      switch (get_sym(word)) {
-        // types
-        case TY_U24: printf("[u24]"); break;
-        case TY_I24: printf("[i24]"); break;
-        case TY_F24: printf("[f24]"); break;
-        // operations
-        case OP_ADD: printf("[+]"); break;
-        case OP_SUB: printf("[-]"); break;
-        case FP_SUB: printf("[:-]"); break;
-        case OP_MUL: printf("[*]"); break;
-        case OP_DIV: printf("[/]"); break;
-        case FP_DIV: printf("[:/]"); break;
-        case OP_REM: printf("[%%]"); break;
-        case FP_REM: printf("[:%%]"); break;
-        case OP_EQ:  printf("[=]"); break;
-        case OP_NEQ: printf("[!]"); break;
-        case OP_LT:  printf("[<]"); break;
-        case OP_GT:  printf("[>]"); break;
-        case OP_AND: printf("[&]"); break;
-        case OP_OR:  printf("[|]"); break;
-        case OP_XOR: printf("[^]"); break;
-        case OP_SHL: printf("[<<]"); break;
-        case FP_SHL: printf("[:<<]"); break;
-        case OP_SHR: printf("[>>]"); break;
-        case FP_SHR: printf("[:>>]"); break;
-        default:     printf("[?]"); break;
-      }
-      break;
-    }
-    case TY_U24: {
-      printf("%u", get_u24(word));
-      break;
-    }
-    case TY_I24: {
-      printf("%+d", get_i24(word));
-      break;
-    }
-    case TY_F24: {
-      if (isinf(get_f24(word))) {
-        if (signbit(get_f24(word))) {
-          printf("-inf");
-        } else {
-          printf("+inf");
-        }
-      } else if (isnan(get_f24(word))) {
-        printf("+NaN");
-      } else {
-        printf("%.7e", get_f24(word));
-      }
-      break;
-    }
-    default: {
-      switch (get_typ(word)) {
-        case OP_ADD: printf("[+0x%07X]", get_u24(word)); break;
-        case OP_SUB: printf("[-0x%07X]", get_u24(word)); break;
-        case FP_SUB: printf("[:-0x%07X]", get_u24(word)); break;
-        case OP_MUL: printf("[*0x%07X]", get_u24(word)); break;
-        case OP_DIV: printf("[/0x%07X]", get_u24(word)); break;
-        case FP_DIV: printf("[:/0x%07X]", get_u24(word)); break;
-        case OP_REM: printf("[%%0x%07X]", get_u24(word)); break;
-        case FP_REM: printf("[:%%0x%07X]", get_u24(word)); break;
-        case OP_EQ:  printf("[=0x%07X]", get_u24(word)); break;
-        case OP_NEQ: printf("[!0x%07X]", get_u24(word)); break;
-        case OP_LT:  printf("[<0x%07X]", get_u24(word)); break;
-        case OP_GT:  printf("[>0x%07X]", get_u24(word)); break;
-        case OP_AND: printf("[&0x%07X]", get_u24(word)); break;
-        case OP_OR:  printf("[|0x%07X]", get_u24(word)); break;
-        case OP_XOR: printf("[^0x%07X]", get_u24(word)); break;
-        case OP_SHL: printf("[<<0x%07X]", get_u24(word)); break;
-        case FP_SHL: printf("[:<<0x%07X]", get_u24(word)); break;
-        case OP_SHR: printf("[>>0x%07X]", get_u24(word)); break;
-        case FP_SHR: printf("[:>>0x%07X]", get_u24(word)); break;
-        default:     printf("[?0x%07X]", get_u24(word)); break;
-      }
-      break;
-    }
-  }
-
-}
-
 void pretty_print_port(Net* net, Book* book, Port port) {
   Port stack[4096];
   stack[0] = port;
@@ -1623,11 +989,22 @@ void pretty_print_port(Net* net, Book* book, Port port) {
   while (len > 0) {
     Port cur = stack[--len];
     switch (get_tag(cur)) {
-      case CON: {
+      case LAM: {
         Pair node = node_load(net,get_val(cur));
         Port p2   = get_snd(node);
         Port p1   = get_fst(node);
         printf("(");
+        stack[len++] = new_port(ERA, (u32)(')'));
+        stack[len++] = p2;
+        stack[len++] = new_port(ERA, (u32)(' '));
+        stack[len++] = p1;
+        break;
+      }
+      case APP: {
+        Pair node = node_load(net,get_val(cur));
+        Port p2   = get_snd(node);
+        Port p1   = get_fst(node);
+        printf("!(");
         stack[len++] = new_port(ERA, (u32)(')'));
         stack[len++] = p2;
         stack[len++] = new_port(ERA, (u32)(' '));
@@ -1651,38 +1028,12 @@ void pretty_print_port(Net* net, Book* book, Port port) {
         }
         break;
       }
-      case NUM: {
-        pretty_print_numb(get_val(cur));
-        break;
-      }
       case DUP: {
         Pair node = node_load(net,get_val(cur));
         Port p2   = get_snd(node);
         Port p1   = get_fst(node);
         printf("{");
         stack[len++] = new_port(ERA, (u32)('}'));
-        stack[len++] = p2;
-        stack[len++] = new_port(ERA, (u32)(' '));
-        stack[len++] = p1;
-        break;
-      }
-      case OPR: {
-        Pair node = node_load(net,get_val(cur));
-        Port p2   = get_snd(node);
-        Port p1   = get_fst(node);
-        printf("$(");
-        stack[len++] = new_port(ERA, (u32)(')'));
-        stack[len++] = p2;
-        stack[len++] = new_port(ERA, (u32)(' '));
-        stack[len++] = p1;
-        break;
-      }
-      case SWI: {
-        Pair node = node_load(net,get_val(cur));
-        Port p2   = get_snd(node);
-        Port p1   = get_fst(node);
-        printf("?(");
-        stack[len++] = new_port(ERA, (u32)(')'));
         stack[len++] = p2;
         stack[len++] = new_port(ERA, (u32)(' '));
         stack[len++] = p1;
@@ -1698,38 +1049,6 @@ void pretty_print_port(Net* net, Book* book, Port port) {
   }
 }
 
-//void pretty_print_rbag(Net* net, RBag* rbag) {
-  //for (u32 i = rbag->lo_ini; i < rbag->lo_end; ++i) {
-    //Pair redex = rbag->lo_buf[i];
-    //if (redex != 0) {
-      //pretty_print_port(net, get_fst(redex));
-      //printf(" ~ ");
-      //pretty_print_port(net, get_snd(redex));
-      //printf("\n");
-    //}
-  //}
-  //for (u32 i = 0; i > rbag->hi_end; ++i) {
-    //Pair redex = rbag->hi_buf[i];
-    //if (redex != 0) {
-      //pretty_print_port(net, get_fst(redex));
-      //printf(" ~ ");
-      //pretty_print_port(net, get_snd(redex));
-      //printf("\n");
-    //}
-  //}
-//}
-
-// Demos
-// -----
-
-  // stress_test 2^10 x 65536
-  //static const u8 BOOK_BUF[] = {6, 0, 0, 0, 0, 0, 0, 0, 109, 97, 105, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 11, 10, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 102, 117, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 25, 0, 0, 0, 2, 0, 0, 0, 102, 117, 110, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 33, 0, 0, 0, 4, 0, 0, 0, 11, 0, 0, 1, 0, 0, 0, 0, 3, 0, 0, 0, 102, 117, 110, 95, 95, 67, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 9, 0, 0, 128, 20, 0, 0, 0, 9, 0, 0, 128, 44, 0, 0, 0, 13, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 3, 4, 0, 0, 38, 0, 0, 0, 24, 0, 0, 0, 16, 0, 0, 0, 8, 0, 0, 0, 24, 0, 0, 0, 4, 0, 0, 0, 108, 111, 111, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 11, 0, 0, 0, 41, 0, 0, 0, 5, 0, 0, 0, 108, 111, 111, 112, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 33, 0, 0, 0, 0, 0, 0, 0};
-
-  // stress_test 2^18 x 65536
-  //static const u8 BOOK_BUF[] = {6, 0, 0, 0, 0, 0, 0, 0, 109, 97, 105, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 11, 18, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 102, 117, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 17, 0, 0, 0, 25, 0, 0, 0, 2, 0, 0, 0, 102, 117, 110, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 33, 0, 0, 0, 4, 0, 0, 0, 11, 0, 0, 1, 0, 0, 0, 0, 3, 0, 0, 0, 102, 117, 110, 95, 95, 67, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 9, 0, 0, 128, 20, 0, 0, 0, 9, 0, 0, 128, 44, 0, 0, 0, 13, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0, 0, 3, 4, 0, 0, 38, 0, 0, 0, 24, 0, 0, 0, 16, 0, 0, 0, 8, 0, 0, 0, 24, 0, 0, 0, 4, 0, 0, 0, 108, 111, 111, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 11, 0, 0, 0, 41, 0, 0, 0, 5, 0, 0, 0, 108, 111, 111, 112, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 33, 0, 0, 0, 0, 0, 0, 0};
-
-  // bitonic_sort 2^20
-  //static const u8 BOOK_BUF[] = {19, 0, 0, 0, 0, 0, 0, 0, 109, 97, 105, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 89, 0, 0, 0, 4, 0, 0, 0, 11, 18, 0, 0, 12, 0, 0, 0, 65, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 100, 111, 119, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 60, 0, 0, 0, 20, 0, 0, 0, 44, 0, 0, 0, 28, 0, 0, 0, 17, 0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 52, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 16, 0, 0, 0, 68, 0, 0, 0, 8, 0, 0, 0, 24, 0, 0, 0, 2, 0, 0, 0, 100, 111, 119, 110, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 13, 0, 0, 0, 8, 0, 0, 0, 4, 0, 0, 0, 25, 0, 0, 128, 60, 0, 0, 0, 25, 0, 0, 128, 84, 0, 0, 0, 13, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 28, 0, 0, 0, 36, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 45, 0, 0, 0, 52, 0, 0, 0, 32, 0, 0, 0, 40, 0, 0, 0, 48, 0, 0, 0, 56, 0, 0, 0, 0, 0, 0, 0, 68, 0, 0, 0, 32, 0, 0, 0, 76, 0, 0, 0, 16, 0, 0, 0, 48, 0, 0, 0, 8, 0, 0, 0, 92, 0, 0, 0, 40, 0, 0, 0, 100, 0, 0, 0, 24, 0, 0, 0, 56, 0, 0, 0, 3, 0, 0, 0, 102, 108, 111, 119, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 60, 0, 0, 0, 20, 0, 0, 0, 44, 0, 0, 0, 28, 0, 0, 0, 33, 0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 52, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 16, 0, 0, 0, 68, 0, 0, 0, 8, 0, 0, 0, 24, 0, 0, 0, 4, 0, 0, 0, 102, 108, 111, 119, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 14, 0, 0, 0, 8, 0, 0, 0, 4, 0, 0, 0, 9, 0, 0, 0, 60, 0, 0, 0, 129, 0, 0, 0, 84, 0, 0, 0, 13, 0, 0, 0, 28, 0, 0, 0, 22, 0, 0, 0, 8, 0, 0, 0, 35, 1, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 44, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 53, 0, 0, 0, 48, 0, 0, 0, 32, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 68, 0, 0, 0, 32, 0, 0, 0, 76, 0, 0, 0, 56, 0, 0, 0, 48, 0, 0, 0, 8, 0, 0, 0, 92, 0, 0, 0, 40, 0, 0, 0, 100, 0, 0, 0, 16, 0, 0, 0, 108, 0, 0, 0, 24, 0, 0, 0, 56, 0, 0, 0, 5, 0, 0, 0, 103, 101, 110, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 8, 0, 0, 0, 20, 0, 0, 0, 8, 0, 0, 0, 28, 0, 0, 0, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 103, 101, 110, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 12, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0, 41, 0, 0, 128, 68, 0, 0, 0, 41, 0, 0, 128, 84, 0, 0, 0, 13, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 29, 0, 0, 0, 60, 0, 0, 0, 38, 0, 0, 0, 54, 0, 0, 0, 59, 2, 0, 0, 46, 0, 0, 0, 35, 1, 0, 0, 16, 0, 0, 0, 59, 2, 0, 0, 24, 0, 0, 0, 32, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 76, 0, 0, 0, 16, 0, 0, 0, 32, 0, 0, 0, 8, 0, 0, 0, 92, 0, 0, 0, 24, 0, 0, 0, 40, 0, 0, 0, 7, 0, 0, 0, 109, 97, 105, 110, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 41, 0, 0, 0, 4, 0, 0, 0, 11, 18, 0, 0, 12, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 109, 97, 105, 110, 95, 95, 67, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 73, 0, 0, 0, 4, 0, 0, 0, 11, 18, 0, 0, 12, 0, 0, 0, 11, 0, 0, 0, 20, 0, 0, 0, 57, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 115, 111, 114, 116, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 60, 0, 0, 0, 20, 0, 0, 0, 44, 0, 0, 0, 28, 0, 0, 0, 81, 0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 52, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 16, 0, 0, 0, 68, 0, 0, 0, 8, 0, 0, 0, 24, 0, 0, 0, 10, 0, 0, 0, 115, 111, 114, 116, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 17, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 25, 0, 0, 0, 60, 0, 0, 0, 73, 0, 0, 128, 92, 0, 0, 0, 73, 0, 0, 128, 116, 0, 0, 0, 13, 0, 0, 0, 36, 0, 0, 0, 22, 0, 0, 0, 29, 0, 0, 0, 35, 1, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 16, 0, 0, 0, 44, 0, 0, 0, 52, 0, 0, 0, 24, 0, 0, 0, 32, 0, 0, 0, 40, 0, 0, 0, 48, 0, 0, 0, 0, 0, 0, 0, 68, 0, 0, 0, 40, 0, 0, 0, 76, 0, 0, 0, 84, 0, 0, 0, 48, 0, 0, 0, 56, 0, 0, 0, 64, 0, 0, 0, 8, 0, 0, 0, 100, 0, 0, 0, 11, 0, 0, 0, 108, 0, 0, 0, 24, 0, 0, 0, 56, 0, 0, 0, 16, 0, 0, 0, 124, 0, 0, 0, 11, 1, 0, 0, 132, 0, 0, 0, 32, 0, 0, 0, 64, 0, 0, 0, 11, 0, 0, 0, 115, 117, 109, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 8, 0, 0, 0, 20, 0, 0, 0, 8, 0, 0, 0, 28, 0, 0, 0, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 115, 117, 109, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 10, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0, 89, 0, 0, 128, 36, 0, 0, 0, 89, 0, 0, 128, 68, 0, 0, 0, 13, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 28, 0, 0, 0, 32, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 44, 0, 0, 0, 16, 0, 0, 0, 54, 0, 0, 0, 3, 4, 0, 0, 62, 0, 0, 0, 40, 0, 0, 0, 32, 0, 0, 0, 8, 0, 0, 0, 76, 0, 0, 0, 24, 0, 0, 0, 40, 0, 0, 0, 13, 0, 0, 0, 115, 119, 97, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 44, 0, 0, 0, 20, 0, 0, 0, 28, 0, 0, 0, 113, 0, 0, 0, 121, 0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 8, 0, 0, 0, 16, 0, 0, 0, 8, 0, 0, 0, 52, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 14, 0, 0, 0, 115, 119, 97, 112, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 8, 0, 0, 0, 20, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 15, 0, 0, 0, 115, 119, 97, 112, 95, 95, 67, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 4, 0, 0, 0, 2, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 20, 0, 0, 0, 8, 0, 0, 0, 28, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 16, 0, 0, 0, 119, 97, 114, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 4, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 52, 0, 0, 0, 20, 0, 0, 0, 28, 0, 0, 0, 137, 0, 0, 0, 145, 0, 0, 0, 0, 0, 0, 0, 36, 0, 0, 0, 8, 0, 0, 0, 44, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 16, 0, 0, 0, 60, 0, 0, 0, 8, 0, 0, 0, 68, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 17, 0, 0, 0, 119, 97, 114, 112, 95, 95, 67, 48, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 12, 0, 0, 0, 6, 0, 0, 0, 4, 0, 0, 0, 105, 0, 0, 0, 76, 0, 0, 0, 13, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 29, 0, 0, 0, 52, 0, 0, 0, 38, 0, 0, 0, 24, 0, 0, 0, 3, 15, 0, 0, 46, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 62, 0, 0, 0, 40, 0, 0, 0, 3, 18, 0, 0, 70, 0, 0, 0, 16, 0, 0, 0, 32, 0, 0, 0, 32, 0, 0, 0, 84, 0, 0, 0, 24, 0, 0, 0, 92, 0, 0, 0, 8, 0, 0, 0, 40, 0, 0, 0, 18, 0, 0, 0, 119, 97, 114, 112, 95, 95, 67, 49, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 21, 0, 0, 0, 12, 0, 0, 0, 4, 0, 0, 0, 129, 0, 0, 128, 92, 0, 0, 0, 129, 0, 0, 128, 132, 0, 0, 0, 13, 0, 0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 28, 0, 0, 0, 36, 0, 0, 0, 16, 0, 0, 0, 24, 0, 0, 0, 44, 0, 0, 0, 52, 0, 0, 0, 32, 0, 0, 0, 40, 0, 0, 0, 61, 0, 0, 0, 68, 0, 0, 0, 48, 0, 0, 0, 56, 0, 0, 0, 76, 0, 0, 0, 84, 0, 0, 0, 64, 0, 0, 0, 72, 0, 0, 0, 80, 0, 0, 0, 88, 0, 0, 0, 8, 0, 0, 0, 100, 0, 0, 0, 56, 0, 0, 0, 108, 0, 0, 0, 40, 0, 0, 0, 116, 0, 0, 0, 24, 0, 0, 0, 124, 0, 0, 0, 72, 0, 0, 0, 88, 0, 0, 0, 0, 0, 0, 0, 140, 0, 0, 0, 48, 0, 0, 0, 148, 0, 0, 0, 32, 0, 0, 0, 156, 0, 0, 0, 16, 0, 0, 0, 164, 0, 0, 0, 64, 0, 0, 0, 80, 0, 0, 0};
 
 //COMPILED_BOOK_BUF//
 
@@ -1750,7 +1069,6 @@ void hvm_c(u32* book_buffer) {
     book = (Book*)malloc(sizeof(Book));
     if (!book_load(book, book_buffer)) {
       fprintf(stderr, "failed to load book\n");
-
       return;
     }
   }
@@ -1764,11 +1082,9 @@ void hvm_c(u32* book_buffer) {
   // Creates an initial redex that calls main
   boot_redex(net, new_pair(new_port(REF, 0), ROOT));
 
-  #ifdef IO
-  do_run_io(net, book, ROOT);
-  #else
+  printf("Starting evaluation...\n");
+
   normalize(net, book);
-  #endif
 
   // Prints the result
   printf("Result: ");
