@@ -295,8 +295,8 @@ static inline Rule get_rule(Port a, Port b) {
     {LINK,VOID,VOID,ERR_,DREF,DREF,DREF,DREF,DREF,ERR_,ERR_}, // REF
     {LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS,ERAS,ERAS,EDCD}, // ERA
     {LINK,ERR_,VOID,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,CHLD,CDCD}, // CAL
-    {LINK,DREF,ERAS,ERR_,ERR_,ANNI,COMM,ELAM,ERR_,ERR_,ERR_}, // LAM
-    {LINK,DREF,ERAS,ERR_,ANNI,ERR_,COMM,ERR_,WAPP,ERR_,ERR_}, // APP
+    {LINK,DREF,ERAS,ERR_,ERR_,BETA,COMM,ELAM,ERR_,ERR_,ERR_}, // LAM
+    {LINK,DREF,ERAS,ERR_,BETA,ERR_,COMM,ERR_,WAPP,ERR_,ERR_}, // APP
     {LINK,DREF,ERAS,ERR_,COMM,COMM,ANNI,EDUP,WDUP,ERR_,ERR_}, // DUP
     {LINK,DREF,ERAS,ERR_,ELAM,ERR_,EDUP,ERR_,EWAI,ERR_,ERR_}, // EVL
     {LINK,DREF,ERAS,ERR_,ERR_,WAPP,WDUP,EWAI,ERR_,ERR_,ERR_}, // WAI
@@ -322,11 +322,20 @@ static inline bool is_high_priority(Rule rule) {
   switch (rule) {
     case COMM:
     case DREF:
+    case BETA:
+    case WAPP:
+    case WDUP:
       return false;
     case LINK:
     case VOID:
     case ERAS:
     case ANNI:
+    case ELAM:
+    case EDUP:
+    case EWAI:
+    case CHLD:
+    case CDCD:
+    case EDCD:
     default:
       return true;
   }
@@ -907,7 +916,7 @@ static inline bool interact_ewai(Net* net, TM* tm, Port a, Port b) {
 // Application wait interaction
 // #@(a b) ~ #W(c d)
 // --------------- WAIT-APP
-// a ~ #W(i #H(#@(b i) #W(c d)))
+// b ~ #W(i #H(#@(a i) #W(c d)))
 static inline bool interact_wapp(Net* net, TM* tm, Port a, Port b) {
   // Allocates needed nodes and vars
   if (!get_resources(net, tm, 1, 3, 1)) {
@@ -929,12 +938,12 @@ static inline bool interact_wapp(Net* net, TM* tm, Port a, Port b) {
   vars_create(net, tm->vloc[0], NONE);
 
   // Stores new nodes
-  node_create(net, tm->nloc[0], new_pair(A2, new_port(VAR, tm->vloc[0])));
+  node_create(net, tm->nloc[0], new_pair(A1, new_port(VAR, tm->vloc[0])));
   node_create(net, tm->nloc[1], new_pair(new_port(APP, tm->nloc[0]), b));
   node_create(net, tm->nloc[2], new_pair(new_port(VAR, tm->vloc[0]), new_port(HLD, tm->nloc[1])));
 
   // Links
-  link_pair(net, tm, new_pair(A1, new_port(WAI, tm->nloc[2])));
+  link_pair(net, tm, new_pair(A2, new_port(WAI, tm->nloc[2])));
 
   return true;
 }

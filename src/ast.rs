@@ -263,8 +263,25 @@ impl Tree {
         let snd = Tree::readback(net, pair.get_snd(), fids)?;
         return Some(Tree::Dup { fst: Box::new(fst), snd: Box::new(snd) });
       }
+      hvm::EVL => {
+        let pair = net.node_load(port.get_val() as usize);
+        let val = Tree::readback(net, pair.get_fst(), fids)?;
+        return Some(Tree::Evl { val: Box::new(val) });
+      }
+      hvm::WAI => {
+        let pair = net.node_load(port.get_val() as usize);
+        let fst = Tree::readback(net, pair.get_fst(), fids)?;
+        let snd = Tree::readback(net, pair.get_snd(), fids)?;
+        return Some(Tree::Wai { fst: Box::new(fst), snd: Box::new(snd) });
+      }
+      hvm::HLD => {
+        let pair = net.node_load(port.get_val() as usize);
+        let fst = Tree::readback(net, pair.get_fst(), fids)?;
+        let snd = Tree::readback(net, pair.get_snd(), fids)?;
+        return Some(Tree::Hld { fst: Box::new(fst), snd: Box::new(snd) });
+      }
       _ => {
-        unreachable!()
+        unreachable!("{}", port.show())
       }
     }
   }

@@ -130,9 +130,9 @@ impl Port {
       [LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK], // VAR
       [LINK,VOID,VOID,ERR_,DREF,DREF,DREF,DREF,DREF,ERR_,ERR_], // REF
       [LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS,ERAS,ERAS,EDCD], // ERA
-      [LINK,ERR_,VOID,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,CDCD], // CAL
-      [LINK,DREF,ERAS,ERR_,ERR_,ANNI,COMM,ELAM,ERR_,ERR_,ERR_], // LAM
-      [LINK,DREF,ERAS,ERR_,ANNI,ERR_,COMM,ERR_,WAPP,ERR_,ERR_], // APP
+      [LINK,ERR_,VOID,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,CHLD,CDCD], // CAL
+      [LINK,DREF,ERAS,ERR_,ERR_,BETA,COMM,ELAM,ERR_,ERR_,ERR_], // LAM
+      [LINK,DREF,ERAS,ERR_,BETA,ERR_,COMM,ERR_,WAPP,ERR_,ERR_], // APP
       [LINK,DREF,ERAS,ERR_,COMM,COMM,ANNI,EDUP,WDUP,ERR_,ERR_], // DUP
       [LINK,DREF,ERAS,ERR_,ELAM,ERR_,EDUP,ERR_,EWAI,ERR_,ERR_], // EVL
       [LINK,DREF,ERAS,ERR_,ERR_,WAPP,WDUP,EWAI,ERR_,ERR_,ERR_], // WAI
@@ -637,8 +637,14 @@ impl TMem {
     let a1 = a_.get_fst();
     let a2 = a_.get_snd();
     let b_ = net.node_take(b.get_val() as usize);
-    let b1 = b_.get_fst();
+    let mut b1 = b_.get_fst();
     let b2 = b_.get_snd();
+
+    // Optimization: Delete all EVL behind the interacting one.
+    while b1.get_tag() == EVL {
+      let node = net.node_take(b1.get_val() as usize);
+      b1 = node.get_fst();
+    }
 
     // Stores new vars.
     net.vars_create(self.vloc[0], NONE);
@@ -686,7 +692,7 @@ impl TMem {
   // #C      ~ d
   pub fn interact_ewai(&mut self, net: &GNet, a: Port, b: Port) -> bool {
     // Allocates needed nodes and vars.
-    if !self.get_resources(net, 2, 0, 0) {
+    if !self.get_resources(net, 2, 1, 0) {
       return false;
     }
 
@@ -696,12 +702,24 @@ impl TMem {
     }
 
     // Loads ports.
+    let a_ = net.node_take(a.get_val() as usize);
+    let mut a1 = a_.get_fst();
+    let a2 = a_.get_snd();
     let b_ = net.node_take(b.get_val() as usize);
     let b1 = b_.get_fst();
-    let b2 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    // Optimization: Delete all EVL behind the interacting one.
+    while a1.get_tag() == EVL {
+      let node = net.node_take(b1.get_val() as usize);
+      a1 = node.get_fst();
+    }
+
+    // Stores new nodes.
+    net.node_create(self.nloc[0], Pair::new(a1, Port::new(ERA, 0)));
 
     // Links.
-    self.link_pair(net, Pair::new(a, b1));
+    self.link_pair(net, Pair::new(Port::new(EVL, self.nloc[0] as u32), b1));
     self.link_pair(net, Pair::new(Port::new(CAL, 0), b2));
 
     true
@@ -710,7 +728,7 @@ impl TMem {
   // Application wait interaction.
   // #@(a b) ~ #W(c d)
   // --------------- WAIT-APP
-  // a ~ #W(i #H(#@(b i) #W(c d)))
+  // b ~ #W(i #H(#@(a i) #W(c d)))
   pub fn interact_wapp(&mut self, net: &GNet, a: Port, b: Port) -> bool {
     // Allocates needed nodes and vars.
     if !self.get_resources(net, 1, 3, 1) {
@@ -731,12 +749,12 @@ impl TMem {
     net.vars_create(self.vloc[0], NONE);
 
     // Stores new nodes.
-    net.node_create(self.nloc[0], Pair::new(a2, Port::new(VAR, self.vloc[0] as u32)));
+    net.node_create(self.nloc[0], Pair::new(a1, Port::new(VAR, self.vloc[0] as u32)));
     net.node_create(self.nloc[1], Pair::new(Port::new(APP, self.nloc[0] as u32), b));
     net.node_create(self.nloc[2], Pair::new(Port::new(VAR, self.vloc[0] as u32), Port::new(HLD, self.nloc[1] as u32)));
 
     // Links.
-    self.link_pair(net, Pair::new(a1, Port::new(WAI, self.nloc[2] as u32)));
+    self.link_pair(net, Pair::new(a2, Port::new(WAI, self.nloc[2] as u32)));
 
     true
   }
@@ -802,8 +820,14 @@ impl TMem {
 
     // Loads ports.
     let b_ = net.node_take(b.get_val() as usize);
-    let b1 = b_.get_fst();
+    let mut b1 = b_.get_fst();
     let b2 = b_.get_snd();
+
+    // Optimization: Delete all EVL behind the newly created EVL.
+    while b1.get_tag() == EVL {
+      let node = net.node_take(b1.get_val() as usize);
+      b1 = node.get_fst();
+    }
 
     // Store new nodes.
     net.node_create(self.nloc[0], Pair::new(b1, Port::new(ERA, 0)));
@@ -1094,9 +1118,14 @@ impl Port {
       VAR => format!("VAR:{:08X}", self.get_val()),
       REF => format!("REF:{:08X}", self.get_val()),
       ERA => format!("ERA:{:08X}", self.get_val()),
+      CAL => format!("CAL:{:08X}", self.get_val()),
       LAM => format!("LAM:{:08X}", self.get_val()),
       APP => format!("APP:{:08X}", self.get_val()),
       DUP => format!("DUP:{:08X}", self.get_val()),
+      EVL => format!("EVL:{:08X}", self.get_val()),
+      WAI => format!("WAI:{:08X}", self.get_val()),
+      HLD => format!("HLD:{:08X}", self.get_val()),
+      DCD => format!("DCD:{:08X}", self.get_val()),
       _   => panic!("Invalid tag"),
     }
   }
