@@ -71,21 +71,20 @@ typedef u32 Numb; // Numb ::= 29-bit (rounded up to u32)
 //#define SWI 0x7 // switch
 
 #define VAR 0x0 // variable
-#define REF 0x1 // reference
+#define REF 0x1 // reference 
 #define ERA 0x2 // eraser
-#define LAM 0x3 // lambda
-#define APP 0x4 // application
-#define DUP 0x5 // duplicator
-//#define EVL 0x6 // eval
-//#define CAL 0x7 // call
-//#define WAI 0x8 // wait
-//#define HLD 0x9 // hold
-//#define DCD 0xA // decide
-//#define AMB 0xB // amb
+#define CAL 0x3 // call
+#define LAM 0x4 // lambda
+#define APP 0x5 // application
+#define DUP 0x6 // duplicator
+#define EVL 0x7 // eval
+#define WAI 0x8 // wait
+#define HLD 0x9 // hold
+#define DCD 0xA // decide
 
 // Interaction Rule Values
 //#define LINK 0x0
-//#define CALL 0x1
+//#define DREF 0x1
 //#define VOID 0x2
 //#define ERAS 0x3
 //#define ANNI 0x4
@@ -93,12 +92,22 @@ typedef u32 Numb; // Numb ::= 29-bit (rounded up to u32)
 //#define OPER 0x6
 //#define SWIT 0x7
 
-#define LINK 0x0
-#define CALL 0x1
-#define VOID 0x2
-#define ERAS 0x3
-#define ANNI 0x4
-#define COMM 0x5
+#define LINK 0x0 // variable link
+#define DREF 0x1 // definition dereference 
+#define VOID 0x2 // erase nullary
+#define ERAS 0x3 // erase binary
+#define ANNI 0x4 // annihilation
+#define COMM 0x5 // commutation
+#define BETA 0x6 // lazy beta reduction
+#define ELAM 0x7 // evaluate lambda
+#define EDUP 0x8 // evaluate superposition
+#define EWAI 0x9 // evaluate wait
+#define WAPP 0xA // wait application
+#define WDUP 0xB // wait duplication
+#define CHLD 0xC // call hold
+#define CDCD 0xD // call decide
+#define EDCD 0xE // erase decide
+#define ERR_ 0xF // error
 
 // Constants
 #define TAG_LEN (4)
@@ -272,22 +281,27 @@ static inline Rule get_rule(Port a, Port b) {
   //const u8 table[8][8] = {
   //  //VAR  REF  ERA  NUM  CON  DUP  OPR  SWI
   //  {LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK}, // VAR
-  //  {LINK,VOID,VOID,VOID,CALL,CALL,CALL,CALL}, // REF
+  //  {LINK,VOID,VOID,VOID,DREF,DREF,DREF,DREF}, // REF
   //  {LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS}, // ERA
   //  {LINK,VOID,VOID,VOID,ERAS,ERAS,OPER,SWIT}, // NUM
-  //  {LINK,CALL,ERAS,ERAS,ANNI,COMM,COMM,COMM}, // CON
-  //  {LINK,CALL,ERAS,ERAS,COMM,ANNI,COMM,COMM}, // DUP
-  //  {LINK,CALL,ERAS,OPER,COMM,COMM,ANNI,COMM}, // OPR
-  //  {LINK,CALL,ERAS,SWIT,COMM,COMM,COMM,ANNI}, // SWI
+  //  {LINK,DREF,ERAS,ERAS,ANNI,COMM,COMM,COMM}, // CON
+  //  {LINK,DREF,ERAS,ERAS,COMM,ANNI,COMM,COMM}, // DUP
+  //  {LINK,DREF,ERAS,OPER,COMM,COMM,ANNI,COMM}, // OPR
+  //  {LINK,DREF,ERAS,SWIT,COMM,COMM,COMM,ANNI}, // SWI
   //};
-  const u8 table[6][6] = {
-    //VAR  REF  ERA  LAM, APP  DUP
-    {LINK,LINK,LINK,LINK,LINK,LINK}, // VAR
-    {LINK,VOID,VOID,CALL,CALL,CALL}, // REF
-    {LINK,VOID,VOID,ERAS,ERAS,ERAS}, // ERA
-    {LINK,CALL,ERAS,ANNI,ANNI,COMM}, // LAM
-    {LINK,CALL,ERAS,ANNI,ANNI,COMM}, // APP
-    {LINK,CALL,ERAS,COMM,COMM,ANNI}, // DUP
+  const u8 table[11][11] = {
+    //VAR  REF  ERA  CAL  LAM  APP  DUP  EVL  WAI  HLD  DCD
+    {LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK}, // VAR
+    {LINK,VOID,VOID,ERR_,DREF,DREF,DREF,DREF,DREF,ERR_,ERR_}, // REF
+    {LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS,ERAS,ERAS,EDCD}, // ERA
+    {LINK,ERR_,VOID,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,CHLD,CDCD}, // CAL
+    {LINK,DREF,ERAS,ERR_,ERR_,ANNI,COMM,ELAM,ERR_,ERR_,ERR_}, // LAM
+    {LINK,DREF,ERAS,ERR_,ANNI,ERR_,COMM,ERR_,WAPP,ERR_,ERR_}, // APP
+    {LINK,DREF,ERAS,ERR_,COMM,COMM,ANNI,EDUP,WDUP,ERR_,ERR_}, // DUP
+    {LINK,DREF,ERAS,ERR_,ELAM,ERR_,EDUP,ERR_,EWAI,ERR_,ERR_}, // EVL
+    {LINK,DREF,ERAS,ERR_,ERR_,WAPP,WDUP,EWAI,ERR_,ERR_,ERR_}, // WAI
+    {LINK,ERR_,ERAS,CHLD,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_}, // HLD
+    {LINK,ERR_,EDCD,CDCD,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_}, // DCD
   };
   return table[get_tag(a)][get_tag(b)];
 }
@@ -307,7 +321,7 @@ static inline bool is_high_priority(Rule rule) {
   // TODO: this needs to be more readable
   switch (rule) {
     case COMM:
-    case CALL:
+    case DREF:
       return false;
     case LINK:
     case VOID:
@@ -620,7 +634,7 @@ static inline bool interact_eras(Net* net, TM* tm, Port a, Port b);
 
 // The Call Interaction.
 #ifdef COMPILED
-///COMPILED_INTERACT_CALL///
+///COMPILED_INTERACT_DREF///
 #else
 static inline bool interact_call(Net* net, TM* tm, Port a, Port b, Book* book) {
   // Loads Definition.
@@ -758,6 +772,347 @@ static inline bool interact_comm(Net* net, TM* tm, Port a, Port b) {
   return true;
 }
 
+// The Lazy Beta Reduction Interaction
+// #λ(a b) ~ #@(c d)
+// --------------- BETA
+// a ~ #W(i #H(i c))
+// b ~ d
+static inline bool interact_beta(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 2, 2, 1)) {
+    debug("interact_beta: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(a)) == 0 || node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair A = node_take(net, get_val(a));
+  Port A1 = get_fst(A);
+  Port A2 = get_snd(A);
+  Pair B = node_take(net, get_val(b));
+  Port B1 = get_fst(B);
+  Port B2 = get_snd(B);
+
+  // Stores new vars
+  vars_create(net, tm->vloc[0], NONE);
+
+  // Stores new nodes
+  node_create(net, tm->nloc[0], new_pair(new_port(VAR, tm->vloc[0]), B1));
+  node_create(net, tm->nloc[1], new_pair(new_port(VAR, tm->vloc[0]), new_port(HLD, tm->nloc[0])));
+
+  // Links
+  link_pair(net, tm, new_pair(A2, B2));
+  link_pair(net, tm, new_pair(new_port(WAI, tm->nloc[1]), A1));
+
+  return true;
+}
+
+// Lambda evaluation interaction
+// #λ(a b) ~ #E(c *)
+// --------------- EVAL-LAM
+// c ~ #λ(a i)
+// #E(i *) ~ b
+static inline bool interact_elam(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 2, 2, 1)) {
+    debug("interact_elam: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(a)) == 0 || node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair A = node_take(net, get_val(a));
+  Port A1 = get_fst(A);
+  Port A2 = get_snd(A);
+  Pair B = node_take(net, get_val(b));
+  Port B1 = get_fst(B);
+
+  // Stores new vars
+  vars_create(net, tm->vloc[0], NONE);
+
+  // Stores new nodes
+  node_create(net, tm->nloc[0], new_pair(A1, new_port(VAR, tm->vloc[0])));
+  node_create(net, tm->nloc[1], new_pair(new_port(VAR, tm->vloc[0]), new_port(ERA, 0)));
+
+  // Links
+  link_pair(net, tm, new_pair(B1, new_port(LAM, tm->nloc[0])));
+  link_pair(net, tm, new_pair(new_port(EVL, tm->nloc[1]), A2));
+
+  return true;
+}
+
+// Dup evaluation interaction
+// #d(a b) ~ #E(c *)
+// --------------- EVAL-DUP
+// #d(a b) ~ c
+static inline bool interact_edup(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 1, 0, 0)) {
+    debug("interact_edup: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(a)) == 0 || node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair B = node_take(net, get_val(b));
+  Port B1 = get_fst(B);
+
+  // Links
+  link_pair(net, tm, new_pair(a, B1));
+
+  return true;
+}
+
+// Wait evaluation interaction
+// #E(a *) ~ #W(c d)
+// --------------- EVAL-WAI
+// #E(a *) ~ c
+// #C      ~ d
+static inline bool interact_ewai(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 2, 0, 0)) {
+    debug("interact_ewai: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(a)) == 0 || node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair B = node_take(net, get_val(b));
+  Port B1 = get_fst(B);
+  Port B2 = get_snd(B);
+
+  // Links
+  link_pair(net, tm, new_pair(a, B1));
+  link_pair(net, tm, new_pair(new_port(CAL, 0), B2));
+
+  return true;
+}
+
+// Application wait interaction
+// #@(a b) ~ #W(c d)
+// --------------- WAIT-APP
+// a ~ #W(i #H(#@(b i) #W(c d)))
+static inline bool interact_wapp(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 1, 3, 1)) {
+    debug("interact_wapp: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(a)) == 0 || node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair A = node_take(net, get_val(a));
+  Port A1 = get_fst(A);
+  Port A2 = get_snd(A);
+
+  // Stores new vars
+  vars_create(net, tm->vloc[0], NONE);
+
+  // Stores new nodes
+  node_create(net, tm->nloc[0], new_pair(A2, new_port(VAR, tm->vloc[0])));
+  node_create(net, tm->nloc[1], new_pair(new_port(APP, tm->nloc[0]), b));
+  node_create(net, tm->nloc[2], new_pair(new_port(VAR, tm->vloc[0]), new_port(HLD, tm->nloc[1])));
+
+  // Links
+  link_pair(net, tm, new_pair(A1, new_port(WAI, tm->nloc[2])));
+
+  return true;
+}
+
+// Duplication wait interaction
+// #d(a b) ~ #W(c d)
+// --------------- WAIT-DUP
+// a ~ #W(i j)
+// b ~ #W(k l)
+// j ~ l ~ #D(d)
+// c ~ #d(i k)
+static inline bool interact_wdup(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 3, 4, 2)) {
+    debug("interact_wdup: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(a)) == 0 || node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair A = node_take(net, get_val(a));
+  Port A1 = get_fst(A);
+  Port A2 = get_snd(A);
+  Pair B = node_take(net, get_val(b));
+  Port B1 = get_fst(B);
+  Port B2 = get_snd(B);
+
+  // Stores new vars
+  vars_create(net, tm->vloc[0], NONE);
+  vars_create(net, tm->vloc[1], NONE);
+
+  // Stores new nodes
+  node_create(net, tm->nloc[0], new_pair(B2, new_port(ERA, 0)));
+  node_create(net, tm->nloc[1], new_pair(new_port(VAR, tm->vloc[0]), new_port(DCD, tm->nloc[0])));
+  node_create(net, tm->nloc[2], new_pair(new_port(VAR, tm->vloc[1]), new_port(DCD, tm->nloc[0])));
+  node_create(net, tm->nloc[3], new_pair(new_port(VAR, tm->vloc[0]), new_port(VAR, tm->vloc[1])));
+
+  // Links
+  link_pair(net, tm, new_pair(A1, new_port(WAI, tm->nloc[1])));
+  link_pair(net, tm, new_pair(A2, new_port(WAI, tm->nloc[2])));
+  link_pair(net, tm, new_pair(B1, new_port(DUP, tm->nloc[3])));
+
+  return true;
+}
+
+// Call hold interaction
+// #C ~ #H(a b)
+// --------------- CALL-HLD
+// #E(a *) ~ b
+static inline bool interact_chld(Net* net, TM* tm, Port a, Port b) {
+  // Allocates needed nodes and vars
+  if (!get_resources(net, tm, 1, 1, 0)) {
+    debug("interact_chld: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair B = node_take(net, get_val(b));
+  Port B1 = get_fst(B);
+  Port B2 = get_snd(B);
+
+  // Store new nodes
+  node_create(net, tm->nloc[0], new_pair(B1, new_port(ERA, 0)));
+
+  // Links
+  link_pair(net, tm, new_pair(new_port(EVL, tm->nloc[0]), B2));
+
+  return true;
+}
+
+// Call decide interaction.
+// #D(a 0) ~ #C ~ b
+// --------------- CALL-DCD(0) (fst)
+// #C      ~ a
+// #D(a 1) ~ b
+//
+// #D(a 1) ~ #C ~ b
+// --------------- CALL-DCD(1) (snd, prev CDCD)
+// .
+//
+// #D(a 2) ~ #C ~ b
+// -----------
+static inline bool interact_cdcd(Net* net, TM* tm, Port a, Port b) {
+  if (!get_resources(net, tm, 1, 0, 0)) {
+    debug("interact_cdcd: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair B = node_load(net, get_val(b));
+  Pair B_ = new_pair(get_fst(B), new_port(CAL, 1));
+  B = node_exchange(net, get_val(b), B_);
+  Port B1 = get_fst(B);
+  Port B2 = get_snd(B);
+
+  switch (get_val(B2)) {
+    case 0: // First to reach
+      link_pair(net, tm, new_pair(B1, new_port(CAL, 0)));
+      return true;
+    case 1: // Second to reach, previous was CDCD
+      node_take(net, get_val(b));
+      return true;
+    case 2: // Second to reach, previous was EDCD
+      node_take(net, get_val(b));
+      link_pair(net, tm, new_pair(B1, new_port(CAL, 1)));
+      return true;
+    default:
+      debug("interact_cdcd: Invalid CDCD state\n");
+      return false;
+  }
+}
+
+// Erase decide interaction.
+// #D(a 0) ~ * ~ b
+// --------------- ERAS-DCD(0) (fst)
+// #D(a 2) ~ b
+//
+// #D(a 1) ~ #C ~ b
+// --------------- ERAS-DCD(1) (snd, prev CDCD)
+// .
+//
+// #D(a 2) ~ #C ~ b
+// --------------- ERAS-DCD(3) (snd, prev EDCD)
+// * ~ a
+static inline bool interact_edcd(Net* net, TM* tm, Port a, Port b) {
+  if (!get_resources(net, tm, 1, 0, 0)) {
+    debug("interact_edcd: get_resources failed\n");
+    return false;
+  }
+
+  // Checks availability
+  if (node_load(net, get_val(b)) == 0) {
+    return false;
+  }
+
+  // Loads ports
+  Pair B = node_load(net, get_val(b));
+  Pair B_ = new_pair(get_fst(B), new_port(CAL, 2));
+  B = node_exchange(net, get_val(b), B_);
+  Port B1 = get_fst(B);
+  Port B2 = get_snd(B);
+
+  switch (get_val(B2)) {
+    case 0: // First to reach
+      return true;
+    case 1: // Second to reach, previous was CDCD
+      node_take(net, get_val(b));
+      return true;
+    case 2: // Second to reach, previous was EDCD
+      node_take(net, get_val(b));
+      link_pair(net, tm, new_pair(B1, new_port(ERA, 0)));
+      return true;
+    default:
+      debug("interact_edcd: Invalid EDCD state\n");
+      return false;
+  }
+}
+
+// Error interaction
+static inline bool interact_err(Net* net, TM* tm, Port a, Port b) {
+  debug("interact_err: Invalid redex pair: %d ~ %d\n", get_tag(a), get_tag(b));
+  return false;
+}
+
 // Pops a local redex and performs a single interaction.
 static inline bool interact(Net* net, TM* tm, Book* book) {
   // Pops a redex.
@@ -774,7 +1129,7 @@ static inline bool interact(Net* net, TM* tm, Book* book) {
 
     // Used for root redex.
     if (get_tag(a) == REF && b == ROOT) {
-      rule = CALL;
+      rule = DREF;
     // Swaps ports if necessary.
     } else if (should_swap(a,b)) {
       swap(&a, &b);
@@ -785,14 +1140,24 @@ static inline bool interact(Net* net, TM* tm, Book* book) {
     switch (rule) {
       case LINK: success = interact_link(net, tm, a, b); break;
       #ifdef COMPILED
-      case CALL: success = interact_call(net, tm, a, b); break;
+      case DREF: success = interact_call(net, tm, a, b); break;
       #else
-      case CALL: success = interact_call(net, tm, a, b, book); break;
+      case DREF: success = interact_call(net, tm, a, b, book); break;
       #endif
-      case VOID: success = interact_void(net, tm, a, b); break;
+      case VOID: success = interact_void(net, tm, a, b); break; 
       case ERAS: success = interact_eras(net, tm, a, b); break;
       case ANNI: success = interact_anni(net, tm, a, b); break;
       case COMM: success = interact_comm(net, tm, a, b); break;
+      case BETA: success = interact_beta(net, tm, a, b); break;
+      case ELAM: success = interact_elam(net, tm, a, b); break;
+      case EDUP: success = interact_edup(net, tm, a, b); break;
+      case EWAI: success = interact_ewai(net, tm, a, b); break;
+      case WAPP: success = interact_wapp(net, tm, a, b); break;
+      case WDUP: success = interact_wdup(net, tm, a, b); break;
+      case CHLD: success = interact_chld(net, tm, a, b); break;
+      case CDCD: success = interact_cdcd(net, tm, a, b); break;
+      case EDCD: success = interact_edcd(net, tm, a, b); break;
+      case ERR_: success = interact_err(net, tm, a, b); break;
     }
 
     // If error, pushes redex back.
@@ -1032,8 +1397,8 @@ void pretty_print_port(Net* net, Book* book, Port port) {
         Pair node = node_load(net,get_val(cur));
         Port p2   = get_snd(node);
         Port p1   = get_fst(node);
-        printf("{");
-        stack[len++] = new_port(ERA, (u32)('}'));
+        printf("#d(");
+        stack[len++] = new_port(ERA, (u32)(')'));
         stack[len++] = p2;
         stack[len++] = new_port(ERA, (u32)(' '));
         stack[len++] = p1;
@@ -1043,6 +1408,46 @@ void pretty_print_port(Net* net, Book* book, Port port) {
         u32  fid = get_val(cur) & 0xFFFFFFF;
         Def* def = &book->defs_buf[fid];
         printf("@%s", def->name);
+        break;
+      }
+      case CAL: {
+        printf("#C");
+        break;
+      }
+      case EVL: {
+        Pair node = node_load(net,get_val(cur));
+        Port p2   = get_snd(node);
+        Port p1   = get_fst(node);
+        printf("#E(");
+        stack[len++] = new_port(ERA, (u32)(')'));
+        stack[len++] = p1;
+        break;
+      }
+      case WAI: {
+        Pair node = node_load(net,get_val(cur));
+        Port p2   = get_snd(node);
+        Port p1   = get_fst(node);
+        printf("#W(");
+        stack[len++] = new_port(ERA, (u32)(')'));
+        stack[len++] = p1;
+        break;
+      }
+      case HLD: {
+        Pair node = node_load(net,get_val(cur));
+        Port p2   = get_snd(node);
+        Port p1   = get_fst(node);
+        printf("#H(");
+        stack[len++] = new_port(ERA, (u32)(')'));
+        stack[len++] = p1;
+        break;
+      }
+      case DCD: {
+        Pair node = node_load(net,get_val(cur));
+        Port p2   = get_snd(node);
+        Port p1   = get_fst(node);
+        printf("#D(");
+        stack[len++] = new_port(ERA, (u32)(')'));
+        stack[len++] = p1;
         break;
       }
     }

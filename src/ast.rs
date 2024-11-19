@@ -15,13 +15,21 @@ pub enum Tree {
   Var { nam: String },
   Ref { nam: String },
   Era,
+  Call,
+  Evl { val: Box<Tree> },
   Lam { fst: Box<Tree>, snd: Box<Tree> },
   App { fst: Box<Tree>, snd: Box<Tree> },
   Dup { fst: Box<Tree>, snd: Box<Tree> },
+  Wai { fst: Box<Tree>, snd: Box<Tree> },
+  Hld { fst: Box<Tree>, snd: Box<Tree> },
+  Dcd { fst: Box<Tree>,},
 }
 
-pub type Redex = (bool, Tree, Tree);
-
+#[derive(Clone, Hash, PartialEq, Eq, Debug)]
+pub enum Redex {
+  Dec(Tree, Tree),
+  Amb(Tree, Tree, Tree)
+}
 #[derive(Clone, Hash, PartialEq, Eq, Debug)]
 pub struct Net {
   pub root: Tree,
@@ -43,45 +51,74 @@ impl<'i> CoreParser<'i> {
   pub fn parse_tree(&mut self) -> ParseResult<Tree> {
     self.skip_trivia();
     //println!("aaa ||{}", &self.input[self.index..]);
-    match self.peek_one() {
-      Some('(') => {
-        self.advance_one();
-        let fst = Box::new(self.parse_tree()?);
-        self.skip_trivia();
-        let snd = Box::new(self.parse_tree()?);
-        self.consume(")")?;
-        Ok(Tree::Lam { fst, snd })
-      }
-      Some('{') => {
-        self.advance_one();
-        let fst = Box::new(self.parse_tree()?);
-        self.skip_trivia();
-        let snd = Box::new(self.parse_tree()?);
-        self.consume("}")?;
-        Ok(Tree::Dup { fst, snd })
-      }
-      Some('!') => {
-        self.advance_one();
-        self.consume("(")?;
-        let fst = Box::new(self.parse_tree()?);
-        self.skip_trivia();
-        let snd = Box::new(self.parse_tree()?);
-        self.consume(")")?;
-        Ok(Tree::App { fst, snd })
-      }
-      Some('@') => {
-        self.advance_one();
-        let nam = self.parse_name()?;
-        Ok(Tree::Ref { nam })
-      }
-      Some('*') => {
-        self.advance_one();
-        Ok(Tree::Era)
-      }
-      _ => {
-        let nam = self.parse_name()?;
-        Ok(Tree::Var { nam })
-      }
+    if self.starts_with("#L(") {
+      self.advance_many(3);
+      let fst = Box::new(self.parse_tree()?);
+      self.skip_trivia();
+      let snd = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::Lam { fst, snd })
+    } 
+    else if self.starts_with("#@(") {
+      self.advance_many(3);
+      let fst = Box::new(self.parse_tree()?);
+      self.skip_trivia();
+      let snd = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::App { fst, snd })
+    } 
+    else if self.starts_with("#d(") {
+      self.advance_many(3);
+      let fst = Box::new(self.parse_tree()?);
+      self.skip_trivia();
+      let snd = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::Dup { fst, snd })
+    } 
+    else if self.starts_with("#E(") {
+      self.advance_many(3);
+      let val = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::Evl { val })
+    } 
+    else if self.starts_with("#W(") {
+      self.advance_many(3);
+      let fst = Box::new(self.parse_tree()?);
+      self.skip_trivia();
+      let snd = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::Wai { fst, snd })
+    } 
+    else if self.starts_with("#H(") {
+      self.advance_many(3);
+      let fst = Box::new(self.parse_tree()?);
+      self.skip_trivia();
+      let snd = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::Hld { fst, snd })
+    } 
+    else if self.starts_with("#D(") {
+      self.advance_many(3);
+      let val = Box::new(self.parse_tree()?);
+      self.consume(")")?;
+      Ok(Tree::Dcd { fst: val })
+    } 
+    else if self.starts_with("#C") {
+      self.advance_many(2);
+      Ok(Tree::Call)
+    } 
+    else if self.starts_with("*") {
+      self.advance_many(1);
+      Ok(Tree::Era)
+    } 
+    else if self.starts_with("@") {
+      self.advance_many(1);
+      let nam = self.parse_name()?;
+      Ok(Tree::Ref { nam })
+    } 
+    else {
+      let nam = self.parse_name()?;
+      Ok(Tree::Var { nam })
     }
   }
 
@@ -94,7 +131,13 @@ impl<'i> CoreParser<'i> {
       let fst = self.parse_tree()?;
       self.consume("~")?;
       let snd = self.parse_tree()?;
-      rbag.push((false,fst,snd));
+      if self.peek_one() == Some('~') {
+        self.consume("~")?;
+        let trd = self.parse_tree()?;
+        rbag.push(Redex::Amb(fst,snd,trd));
+      } else {
+        rbag.push(Redex::Dec(fst,snd));
+      }
       self.skip_trivia();
     }
     Ok(Net { root, rbag })
@@ -130,9 +173,14 @@ impl Tree {
       Tree::Var { nam } => nam.to_string(),
       Tree::Ref { nam } => format!("@{}", nam),
       Tree::Era => "*".to_string(),
-      Tree::Lam { fst, snd } => format!("({} {})", fst.show(), snd.show()),
-      Tree::App { fst, snd } => format!("!({} {})", fst.show(), snd.show()),
-      Tree::Dup { fst, snd } => format!("{{{} {}}}", fst.show(), snd.show()),
+      Tree::Call => "#C".to_string(),
+      Tree::Lam { fst, snd } => format!("#L({} {})", fst.show(), snd.show()),
+      Tree::App { fst, snd } => format!("#@({} {})", fst.show(), snd.show()),
+      Tree::Dup { fst, snd } => format!("#d({} {})", fst.show(), snd.show()),
+      Tree::Evl { val } => format!("#E({})", val.show()),
+      Tree::Wai { fst, snd } => format!("#W({} {})", fst.show(), snd.show()),
+      Tree::Hld { fst, snd } => format!("#H({} {})", fst.show(), snd.show()),
+      Tree::Dcd { fst } => format!("#D({})", fst.show()),
     }
   }
 }
@@ -140,12 +188,23 @@ impl Tree {
 impl Net {
   pub fn show(&self) -> String {
     let mut s = self.root.show();
-    for (par, fst, snd) in &self.rbag {
-      s.push_str(" &");
-      s.push_str(if *par { "!" } else { " " });
-      s.push_str(&fst.show());
-      s.push_str(" ~ ");
-      s.push_str(&snd.show());
+    for redex in &self.rbag {
+      match redex {
+        Redex::Dec(fst, snd) => {
+          s.push_str(" &");
+          s.push_str(&fst.show());
+          s.push_str(" ~ ");
+          s.push_str(&snd.show());
+        }
+        Redex::Amb(fst, snd, trd) => {
+          s.push_str(" &");
+          s.push_str(&fst.show());
+          s.push_str(" ~ ");
+          s.push_str(&snd.show());
+          s.push_str(" ~ ");
+          s.push_str(&trd.show());
+        }
+      }
     }
     s
   }
@@ -247,6 +306,9 @@ impl Tree {
       Tree::Era => {
         return hvm::Port::new(hvm::ERA, 0);
       }
+      Tree::Call => {
+        return hvm::Port::new(hvm::CAL, 0);
+      }
       Tree::Lam { fst, snd } => {
         let index = def.node.len();
         def.node.push(hvm::Pair(0));
@@ -272,6 +334,36 @@ impl Tree {
         def.node[index] = hvm::Pair::new(p1, p2);
         return hvm::Port::new(hvm::DUP, index as hvm::Val);
       },
+      Tree::Evl { val } => {
+        let index = def.node.len();
+        def.node.push(hvm::Pair(0));
+        let p1 = val.build(def, fids, vars);
+        def.node[index] = hvm::Pair::new(p1, hvm::Port::new(hvm::ERA, 0));
+        return hvm::Port::new(hvm::EVL, index as hvm::Val);
+      },
+      Tree::Wai { fst, snd } => {
+        let index = def.node.len();
+        def.node.push(hvm::Pair(0));
+        let p1 = fst.build(def, fids, vars);
+        let p2 = snd.build(def, fids, vars);
+        def.node[index] = hvm::Pair::new(p1, p2);
+        return hvm::Port::new(hvm::WAI, index as hvm::Val);
+      },
+      Tree::Hld { fst, snd } => {
+        let index = def.node.len();
+        def.node.push(hvm::Pair(0));
+        let p1 = fst.build(def, fids, vars);
+        let p2 = snd.build(def, fids, vars);
+        def.node[index] = hvm::Pair::new(p1, p2);
+        return hvm::Port::new(hvm::HLD, index as hvm::Val);
+      },
+      Tree::Dcd { fst } => {
+        let index = def.node.len();
+        def.node.push(hvm::Pair(0));
+        let p1 = fst.build(def, fids, vars);
+        def.node[index] = hvm::Pair::new(p1, hvm::Port::new(hvm::ERA, 0));
+        return hvm::Port::new(hvm::DCD, index as hvm::Val);
+      },
     }
   }
 
@@ -287,6 +379,11 @@ impl Tree {
         Tree::Dup { fst, snd } => { stack.push(fst); stack.push(snd); },
         Tree::Var { nam } => {},
         Tree::Era => {},
+        Tree::Call => {},
+        Tree::Evl { val } => { stack.push(val); },
+        Tree::Wai { fst, snd } => { stack.push(fst); stack.push(snd); },
+        Tree::Hld { fst, snd } => { stack.push(fst); stack.push(snd); },
+        Tree::Dcd { fst } => { stack.push(fst); },
       };
     }
     acc
@@ -297,13 +394,29 @@ impl Net {
   pub fn build(&self, def: &mut hvm::Def, fids: &BTreeMap<String, hvm::Val>, vars: &mut BTreeMap<String, hvm::Val>) {
     let index = def.node.len();
     def.root = self.root.build(def, fids, vars);
-    for (par, fst, snd) in &self.rbag {
-      let index = def.rbag.len();
-      def.rbag.push(hvm::Pair(0));
-      let p1 = fst.build(def, fids, vars);
-      let p2 = snd.build(def, fids, vars);
-      let rx = hvm::Pair::new(p1, p2);
-      def.rbag[index] = rx;
+    for redex in &self.rbag {
+      match redex {
+        Redex::Dec(fst, snd) => {
+          let index = def.rbag.len();
+          def.rbag.push(hvm::Pair(0));
+          let p1 = fst.build(def, fids, vars);
+          let p2 = snd.build(def, fids, vars);
+          let rx = hvm::Pair::new(p1, p2);
+          def.rbag[index] = rx;
+        }
+        Redex::Amb(fst, snd, trd) => {
+          let index = def.rbag.len();
+          def.rbag.push(hvm::Pair(0));
+          def.rbag.push(hvm::Pair(0));
+          let p1 = fst.build(def, fids, vars);
+          let p2 = snd.build(def, fids, vars);
+          let p3 = trd.build(def, fids, vars);
+          let rx1 = hvm::Pair::new(p1, p2);
+          let rx2 = hvm::Pair::new(p1, p3);
+          def.rbag[index+0] = rx1;
+          def.rbag[index+1] = rx2;
+        }
+      }
     }
   }
 }
@@ -409,9 +522,18 @@ impl Book {
 
     for (name, net) in self.defs.iter() {
       process(&net.root, name);
-      for (_, r1, r2) in net.rbag.iter() {
-        process(r1, name);
-        process(r2, name);
+      for redex in &net.rbag {
+        match redex {
+          Redex::Dec(fst, snd) => {
+            process(fst, name);
+            process(snd, name);
+          }
+          Redex::Amb(fst, snd, trd) => {
+            process(fst, name);
+            process(snd, name);
+            process(trd, name);
+          }
+        }
       }
     }
     result

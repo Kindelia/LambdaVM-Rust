@@ -28,17 +28,32 @@ pub struct APair(pub AtomicU64);
 pub const VAR : Tag = 0x0; // variable
 pub const REF : Tag = 0x1; // reference
 pub const ERA : Tag = 0x2; // eraser
-pub const LAM : Tag = 0x3; // lambda
-pub const APP : Tag = 0x4; // application
-pub const DUP : Tag = 0x5; // duplicator
+pub const CAL : Tag = 0x3; // call
+pub const LAM : Tag = 0x4; // lambda
+pub const APP : Tag = 0x5; // application
+pub const DUP : Tag = 0x6; // duplicator
+pub const EVL : Tag = 0x7; // eval
+pub const WAI : Tag = 0x8; // wait
+pub const HLD : Tag = 0x9; // hold
+pub const DCD : Tag = 0xA; // decide
 
 // Rules
-pub const LINK : Rule = 0x0;
-pub const CALL : Rule = 0x1;
-pub const VOID : Rule = 0x2;
-pub const ERAS : Rule = 0x3;
-pub const ANNI : Rule = 0x4;
-pub const COMM : Rule = 0x5;
+pub const LINK : Rule = 0x0; // variable link
+pub const DREF : Rule = 0x1; // definition dereference
+pub const VOID : Rule = 0x2; // erase nullary
+pub const ERAS : Rule = 0x3; // erase binary
+pub const ANNI : Rule = 0x4; // annihilation
+pub const COMM : Rule = 0x5; // commutation
+pub const BETA : Rule = 0x6; // lazy beta reduction
+pub const ELAM : Rule = 0x7; // evaluate lambda
+pub const EDUP : Rule = 0x8; // evaluate superposition
+pub const EWAI : Rule = 0x9; // evaluate wait
+pub const WAPP : Rule = 0xA; // wait application
+pub const WDUP : Rule = 0xB; // wait duplication
+pub const CHLD : Rule = 0xC; // call hold
+pub const CDCD : Rule = 0xD; // call decide
+pub const EDCD : Rule = 0xE; // erase decide
+pub const ERR_ : Rule = 0xF; // error
 
 // Constants
 pub const FREE : Port = Port(0x0);
@@ -110,14 +125,19 @@ impl Port {
   }
 
   pub fn get_rule(a: Port, b: Port) -> Rule {
-    const TABLE: [[Rule; 6]; 6] = [
-      //VAR  REF  ERA  LAM  APP  DUP
-      [LINK,LINK,LINK,LINK,LINK,LINK], // VAR
-      [LINK,VOID,VOID,CALL,CALL,CALL], // REF
-      [LINK,VOID,VOID,ERAS,ERAS,ERAS], // ERA
-      [LINK,CALL,ERAS,ANNI,ANNI,COMM], // LAM
-      [LINK,CALL,ERAS,ANNI,ANNI,COMM], // APP
-      [LINK,CALL,ERAS,COMM,COMM,ANNI], // DUP
+    const TABLE: [[Rule; 11]; 11] = [
+      //VAR  REF  ERA  CAL  LAM  APP  DUP  EVL  WAI  HLD  DCD
+      [LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK,LINK], // VAR
+      [LINK,VOID,VOID,ERR_,DREF,DREF,DREF,DREF,DREF,ERR_,ERR_], // REF
+      [LINK,VOID,VOID,VOID,ERAS,ERAS,ERAS,ERAS,ERAS,ERAS,EDCD], // ERA
+      [LINK,ERR_,VOID,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,CDCD], // CAL
+      [LINK,DREF,ERAS,ERR_,ERR_,ANNI,COMM,ELAM,ERR_,ERR_,ERR_], // LAM
+      [LINK,DREF,ERAS,ERR_,ANNI,ERR_,COMM,ERR_,WAPP,ERR_,ERR_], // APP
+      [LINK,DREF,ERAS,ERR_,COMM,COMM,ANNI,EDUP,WDUP,ERR_,ERR_], // DUP
+      [LINK,DREF,ERAS,ERR_,ELAM,ERR_,EDUP,ERR_,EWAI,ERR_,ERR_], // EVL
+      [LINK,DREF,ERAS,ERR_,ERR_,WAPP,WDUP,EWAI,ERR_,ERR_,ERR_], // WAI
+      [LINK,ERR_,ERAS,CHLD,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_], // HLD
+      [LINK,ERR_,EDCD,CDCD,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_,ERR_], // DCD
     ];
     return TABLE[a.get_tag() as usize][b.get_tag() as usize];
   }
@@ -128,9 +148,9 @@ impl Port {
 
   pub fn is_high_priority(rule: Rule) -> bool {
     match rule {
-      COMM | CALL => false,
-      LINK | VOID | ERAS | ANNI => true,
-      _ => unreachable!(),
+      COMM | DREF | BETA | WAPP | WDUP => true,
+      LINK | VOID | ERAS | ANNI | ELAM | EDUP | EWAI | CHLD | CDCD | EDCD | ERR_ => true,
+      _ => unreachable!("Invalid rule {}", rule),
     }
   }
 
@@ -453,6 +473,10 @@ impl TMem {
   }
 
   // The Eras Interaction.
+  // #X(a b) ~ *
+  // --------------- ERAS
+  // a ~ *
+  // b ~ *
   pub fn interact_eras(&mut self, net: &GNet, a: Port, b: Port) -> bool {
     // Allocates needed nodes and vars.
     if !self.get_resources(net, 2, 0, 0) {
@@ -477,6 +501,10 @@ impl TMem {
   }
 
   // The Anni Interaction.
+  // #X(a b) ~ #X(c d)
+  // --------------- ANNI
+  // a ~ c
+  // b ~ d
   pub fn interact_anni(&mut self, net: &GNet, a: Port, b: Port) -> bool {
     // Allocates needed nodes and vars.
     if !self.get_resources(net, 2, 0, 0) {
@@ -504,6 +532,12 @@ impl TMem {
   }
 
   // The Comm Interaction.
+  // #X(a b) ~ #Y(c d)
+  // --------------- COMM
+  // a ~ #Y(l m)
+  // b ~ #Y(n o)
+  // c ~ #X(l n)
+  // d ~ #X(m o)
   pub fn interact_comm(&mut self, net: &GNet, a: Port, b: Port) -> bool {
     // Allocates needed nodes and vars.
     if !self.get_resources(net, 4, 4, 4) {
@@ -544,6 +578,359 @@ impl TMem {
     true
   }
 
+  // The Lazy Beta Reduction Interaction.
+  // #λ(a b) ~ #@(c d)
+  // --------------- BETA
+  // a ~ #W(i #H(i c))
+  // b ~ d
+  pub fn interact_beta(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 2, 2, 1) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(a.get_val() as usize).0 == 0 || net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let a_ = net.node_take(a.get_val() as usize);
+    let a1 = a_.get_fst();
+    let a2 = a_.get_snd();
+    let b_ = net.node_take(b.get_val() as usize);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    // Stores new vars.
+    net.vars_create(self.vloc[0], NONE);
+
+    // Stores new nodes.
+    net.node_create(self.nloc[0], Pair::new(Port::new(VAR, self.vloc[0] as u32), b1));
+    net.node_create(self.nloc[1], Pair::new(Port::new(VAR, self.vloc[0] as u32), Port::new(HLD, self.nloc[0] as u32)));
+
+    // Links.
+    self.link_pair(net, Pair::new(a2, b2));
+    self.link_pair(net, Pair::new(Port::new(WAI, self.nloc[1] as u32), a1));
+
+    true
+  }
+
+  // Lambda evaluation interaction.
+  // #λ(a b) ~ #E(c *)
+  // --------------- EVAL-LAM
+  // c ~ #λ(a i)
+  // #E(i *) ~ b
+  pub fn interact_elam(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 2, 2, 1) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(a.get_val() as usize).0 == 0 || net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let a_ = net.node_take(a.get_val() as usize);
+    let a1 = a_.get_fst();
+    let a2 = a_.get_snd();
+    let b_ = net.node_take(b.get_val() as usize);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    // Stores new vars.
+    net.vars_create(self.vloc[0], NONE);
+
+    // Stores new nodes.
+    net.node_create(self.nloc[0], Pair::new(a1, Port::new(VAR, self.vloc[0] as u32)));
+    net.node_create(self.nloc[1], Pair::new(Port::new(VAR, self.vloc[0] as u32), Port::new(ERA, 0)));
+
+    // Links.
+    self.link_pair(net, Pair::new(b1, Port::new(LAM, self.nloc[0] as u32)));
+    self.link_pair(net, Pair::new(Port::new(EVL, self.nloc[1] as u32), a2));
+
+    true
+  }
+
+  // Dup evaluation interaction.
+  // #d(a b) ~ #E(c *)
+  // --------------- EVAL-DUP
+  // #d(a b) ~ c
+  pub fn interact_edup(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 1, 0, 0) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(a.get_val() as usize).0 == 0 || net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let b_ = net.node_take(b.get_val() as usize);
+    let b1 = b_.get_fst();
+
+    // Links.
+    self.link_pair(net, Pair::new(a, b1));
+
+    true
+  }
+
+  // Wait evaluation interaction.
+  // #E(a *) ~ #W(c d)
+  // --------------- EVAL-WAI
+  // #E(a *) ~ c
+  // #C      ~ d
+  pub fn interact_ewai(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 2, 0, 0) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(a.get_val() as usize).0 == 0 || net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let b_ = net.node_take(b.get_val() as usize);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_fst();
+
+    // Links.
+    self.link_pair(net, Pair::new(a, b1));
+    self.link_pair(net, Pair::new(Port::new(CAL, 0), b2));
+
+    true
+  }
+
+  // Application wait interaction.
+  // #@(a b) ~ #W(c d)
+  // --------------- WAIT-APP
+  // a ~ #W(i #H(#@(b i) #W(c d)))
+  pub fn interact_wapp(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 1, 3, 1) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(a.get_val() as usize).0 == 0 || net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let a_ = net.node_take(a.get_val() as usize);
+    let a1 = a_.get_fst();
+    let a2 = a_.get_snd();
+
+    // Stores new vars.
+    net.vars_create(self.vloc[0], NONE);
+
+    // Stores new nodes.
+    net.node_create(self.nloc[0], Pair::new(a2, Port::new(VAR, self.vloc[0] as u32)));
+    net.node_create(self.nloc[1], Pair::new(Port::new(APP, self.nloc[0] as u32), b));
+    net.node_create(self.nloc[2], Pair::new(Port::new(VAR, self.vloc[0] as u32), Port::new(HLD, self.nloc[1] as u32)));
+
+    // Links.
+    self.link_pair(net, Pair::new(a1, Port::new(WAI, self.nloc[2] as u32)));
+
+    true
+  }
+
+  // Duplication wait interaction.
+  // #d(a b) ~ #W(c d)
+  // --------------- WAIT-DUP
+  // a ~ #W(i j)
+  // b ~ #W(k l)
+  // j ~ l ~ #D(d)
+  // c ~ #d(i k)
+  pub fn interact_wdup(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 3, 4, 2) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(a.get_val() as usize).0 == 0 || net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let a_ = net.node_take(a.get_val() as usize);
+    let a1 = a_.get_fst();
+    let a2 = a_.get_snd();
+    let b_ = net.node_take(b.get_val() as usize);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    // Stores new vars.
+    net.vars_create(self.vloc[0], NONE); // dup1
+    net.vars_create(self.vloc[1], NONE); // dup2
+
+    // Stores new nodes.
+    net.node_create(self.nloc[0], Pair::new(b2, Port::new(ERA, 0)));
+    net.node_create(self.nloc[1], Pair::new(Port::new(VAR, self.vloc[0] as u32), Port::new(DCD, self.nloc[0] as u32)));
+    net.node_create(self.nloc[2], Pair::new(Port::new(VAR, self.vloc[1] as u32), Port::new(DCD, self.nloc[0] as u32)));
+    net.node_create(self.nloc[3], Pair::new(Port::new(VAR, self.vloc[0] as u32), Port::new(VAR, self.vloc[1] as u32)));
+
+    // Links.
+    self.link_pair(net, Pair::new(a1, Port::new(WAI, self.nloc[1] as u32)));
+    self.link_pair(net, Pair::new(a2, Port::new(WAI, self.nloc[2] as u32)));
+    self.link_pair(net, Pair::new(b1, Port::new(DUP, self.nloc[3] as u32)));
+
+    true
+  }
+
+  // Call hold interaction.
+  // #C ~ #H(a b)
+  // --------------- CALL-HLD
+  // #E(a *) ~ b
+  pub fn interact_chld(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // Allocates needed nodes and vars.
+    if !self.get_resources(net, 1, 1, 0) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let b_ = net.node_take(b.get_val() as usize);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    // Store new nodes.
+    net.node_create(self.nloc[0], Pair::new(b1, Port::new(ERA, 0)));
+
+    // Links.
+    self.link_pair(net, Pair::new(Port::new(EVL, self.nloc[0] as u32), b2));
+
+    true
+  }
+
+  // Call decide interaction.
+  // #D(a 0) ~ #C ~ b
+  // --------------- CALL-DCD(0) (fst)
+  // #C      ~ a
+  // #D(a 1) ~ b
+  //
+  // #D(a 1) ~ #C ~ b
+  // --------------- CALL-DCD(1) (snd, prev CDCD)
+  // .
+  //
+  // #D(a 2) ~ #C ~ b
+  // --------------- CALL-DCD(2) (snd, prev EDCD)
+  // #C ~ a
+  pub fn interact_cdcd(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    // The two principal ports of the decide node race to get its value.
+    // They communicate by atomically swapping the second aux port of the DCD which is unused.
+    // We swap the second aux port value with 0x1
+    // If the taken value was 0x0, that this was the first node to reach the decide node.
+    // Execute the interaction and continue.
+    // If the taken value was 0x1, this was the second node and the previous one did a CDCD interaction.
+    // This means that we just erase the call, free the decide node and return nothing.
+    // If the taken value was 0x2, this was the second node and the previous one did a EDCD interaction.
+    // We propagate the call to port 1 of the DCD.
+    // 
+    // This does not implement exactly the same interaction as in the paper,
+    // but since the only thing that can reach a DCD are CAL and negative ERA,
+    // the positive ERA would not propagate upwards anyways.
+    if !self.get_resources(net, 1, 0, 0) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let b_ = net.node_load(b.get_val() as usize);
+    let b_ = Pair::new(b_.get_fst(), Port::new(CAL, 1));
+    let b_ = net.node_exchange(b.get_val() as usize, b_);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    match b2.get_val() {
+      0 => {
+        // First to reach
+        self.link_pair(net, Pair::new(b1, Port::new(CAL, 0)));
+        true
+      }
+      1 => {
+        // Second to reach, previous was CDCD
+        net.node_take(b.get_val() as usize);
+        true
+      }
+      2 => {
+        // Second to reach, previous was EDCD
+        net.node_take(b.get_val() as usize);
+        self.link_pair(net, Pair::new(b1, Port::new(CAL, 1)));
+        true
+      }
+      _ => unreachable!("Invalid CDCD state")
+    }
+  }
+
+  // Erase decide interaction.
+  // #D(a 0) ~ * ~ b
+  // --------------- ERAS-DCD(0) (fst)
+  // #D(a 2) ~ b
+  //
+  // #D(a 1) ~ #C ~ b
+  // --------------- ERAS-DCD(1) (snd, prev CDCD)
+  // .
+  //
+  // #D(a 2) ~ #C ~ b
+  // --------------- ERAS-DCD(3) (snd, prev EDCD)
+  // * ~ a
+  pub fn interact_edcd(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    if !self.get_resources(net, 1, 0, 0) {
+      return false;
+    }
+
+    // Checks availability
+    if net.node_load(b.get_val() as usize).0 == 0 {
+      return false;
+    }
+
+    // Loads ports.
+    let b_ = net.node_load(b.get_val() as usize);
+    let b_ = Pair::new(b_.get_fst(), Port::new(CAL, 2));
+    let b_ = net.node_exchange(b.get_val() as usize, b_);
+    let b1 = b_.get_fst();
+    let b2 = b_.get_snd();
+
+    match b2.get_val() {
+      0 => {
+        // First to reach
+        true
+      }
+      1 => {
+        // Second to reach, previous was CDCD
+        net.node_take(b.get_val() as usize);
+        true
+      }
+      2 => {
+        // Second to reach, previous was EDCD
+        net.node_take(b.get_val() as usize);
+        self.link_pair(net, Pair::new(b1, Port::new(ERA, 0)));
+        true
+      }
+      _ => unreachable!("Invalid EDCD state")
+    }
+  }
+
+  pub fn interact_err(&mut self, net: &GNet, a: Port, b: Port) -> bool {
+    unreachable!("Invalid redex pair: {} ~ {}", a.show(), b.show());
+  }
+
   // Pops a local redex and performs a single interaction.
   pub fn interact(&mut self, net: &GNet, book: &Book) -> bool {
     // Pops a redex.
@@ -561,7 +948,7 @@ impl TMem {
 
     // Used for root redex.
     if a.get_tag() == REF && b == ROOT {
-      rule = CALL;
+      rule = DREF;
     // Swaps ports if necessary.
     } else if Port::should_swap(a,b) {
       let x = a; a = b; b = x;
@@ -571,11 +958,21 @@ impl TMem {
 
     let success = match rule {
       LINK => self.interact_link(net, a, b),
-      CALL => self.interact_call(net, a, b, book),
+      DREF => self.interact_call(net, a, b, book),
       VOID => self.interact_void(net, a, b),
       ERAS => self.interact_eras(net, a, b),
       ANNI => self.interact_anni(net, a, b),
       COMM => self.interact_comm(net, a, b),
+      BETA => self.interact_beta(net, a, b),
+      ELAM => self.interact_elam(net, a, b),
+      EDUP => self.interact_edup(net, a, b),
+      EWAI => self.interact_ewai(net, a, b),
+      WAPP => self.interact_wapp(net, a, b),
+      WDUP => self.interact_wdup(net, a, b),
+      CHLD => self.interact_chld(net, a, b),
+      CDCD => self.interact_cdcd(net, a, b),
+      EDCD => self.interact_edcd(net, a, b),
+      ERR_ => self.interact_err(net, a, b),
       _    => panic!("Invalid rule"),
     };
 
