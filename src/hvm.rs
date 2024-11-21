@@ -371,6 +371,31 @@ impl TMem {
     let mut a = a;
     let mut b = b;
 
+    // Optimization: Delete chains of EVLs
+    while a.get_tag() == EVL {
+      let node = net.node_load(a.get_val() as usize);
+      // Child is also EVL, remove one layer
+      if node.get_fst().get_tag() == EVL {
+        net.node_take(a.get_val() as usize);
+        a = node.get_fst();
+        continue;
+      } else {
+        break;
+      }
+    }
+
+    while b.get_tag() == EVL {
+      let node = net.node_load(b.get_val() as usize);
+      if node.get_fst().get_tag() == EVL {
+        println!("eval deleted");
+        net.node_take(b.get_val() as usize);
+        b = node.get_fst();
+        continue;
+      } else {
+        break;
+      }
+    }
+
     // Attempts to directionally point `A ~> B`
     loop {
       // If `A` is NODE: swap `A` and `B`, and continue
@@ -637,14 +662,8 @@ impl TMem {
     let a1 = a_.get_fst();
     let a2 = a_.get_snd();
     let b_ = net.node_take(b.get_val() as usize);
-    let mut b1 = b_.get_fst();
+    let b1 = b_.get_fst();
     let b2 = b_.get_snd();
-
-    // Optimization: Delete all EVL behind the interacting one.
-    while b1.get_tag() == EVL {
-      let node = net.node_take(b1.get_val() as usize);
-      b1 = node.get_fst();
-    }
 
     // Stores new vars.
     net.vars_create(self.vloc[0], NONE);
@@ -703,17 +722,11 @@ impl TMem {
 
     // Loads ports.
     let a_ = net.node_take(a.get_val() as usize);
-    let mut a1 = a_.get_fst();
+    let a1 = a_.get_fst();
     let a2 = a_.get_snd();
     let b_ = net.node_take(b.get_val() as usize);
     let b1 = b_.get_fst();
     let b2 = b_.get_snd();
-
-    // Optimization: Delete all EVL behind the interacting one.
-    while a1.get_tag() == EVL {
-      let node = net.node_take(b1.get_val() as usize);
-      a1 = node.get_fst();
-    }
 
     // Stores new nodes.
     net.node_create(self.nloc[0], Pair::new(a1, Port::new(ERA, 0)));
@@ -820,14 +833,8 @@ impl TMem {
 
     // Loads ports.
     let b_ = net.node_take(b.get_val() as usize);
-    let mut b1 = b_.get_fst();
+    let b1 = b_.get_fst();
     let b2 = b_.get_snd();
-
-    // Optimization: Delete all EVL behind the newly created EVL.
-    while b1.get_tag() == EVL {
-      let node = net.node_take(b1.get_val() as usize);
-      b1 = node.get_fst();
-    }
 
     // Store new nodes.
     net.node_create(self.nloc[0], Pair::new(b1, Port::new(ERA, 0)));

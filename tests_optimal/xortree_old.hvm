@@ -1,0 +1,40 @@
+@Bool/False = (a (* a))
+
+@Bool/True = (* (a a))
+
+@Nat/Succ = (a ((a b) (* b)))
+
+@Nat/Zero = (* (a a))
+
+@Tree/Leaf = (a (* ((a b) b)))
+
+@Tree/Node = (a (b ((a (b c)) (* c))))
+
+@main = b
+  & @xor_tree ~ (a b)
+  & @mk_tree ~ (@num (@Bool/True a))
+
+@mk_tree = ((@mk_tree__C1 (@mk_tree__C0 (a b))) (a b))
+
+@mk_tree__C0 = (a b)
+  & @Tree/Leaf ~ (a b)
+
+@mk_tree__C1 = ({a c} (* e))
+  & @Tree/Node ~ (b (d e))
+  & @mk_tree ~ (a (@Bool/True b))
+  & @mk_tree ~ (c (@Bool/False d))
+
+@num = b
+  & @Nat/Succ ~ (a b)
+  & @Nat/Succ ~ (@Nat/Zero a)
+
+@xor = (((a a) (@xor__C0 b)) b)
+
+@xor__C0 = ((@Bool/True (@Bool/False a)) a)
+
+@xor_tree = ((@xor_tree__C0 ((a a) b)) b)
+
+@xor_tree__C0 = (a (c e))
+  & @xor ~ (b (d e))
+  & @xor_tree ~ (a b)
+  & @xor_tree ~ (c d)

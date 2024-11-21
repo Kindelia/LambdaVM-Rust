@@ -1427,8 +1427,7 @@ void pretty_print_port(Net* net, Book* book, Port port) {
         Pair node = node_load(net,get_val(cur));
         Port p2   = get_snd(node);
         Port p1   = get_fst(node);
-        printf("#E(");
-        stack[len++] = new_port(ERA, (u32)(')'));
+        printf("'");
         stack[len++] = p1;
         break;
       }

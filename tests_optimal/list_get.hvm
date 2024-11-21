@@ -1,0 +1,28 @@
+@List/Cons = #L(a #L(b #L(* #L(#@(a #@(b c)) c))))
+
+@List/Nil = #L(a #L(* a))
+
+@Nat/Succ = #L(a #L(#@(a b) #L(* b)))
+
+@Nat/Zero = #L(* #L(a a))
+
+@get = #L(#@(@get__C2 #@(@get__C1 #@(a b))) #L(a b))
+
+@get__C0 = #L(* #L(b #L(a c)))
+  & @get ~ #@(a #@(b c))
+
+@get__C1 = #L(#@(* #@(#L(a #L(* a)) b)) b)
+
+@get__C2 = #L(a #L(#@(#L(* *) #@(@get__C0 #@(a b))) b))
+
+@main = #L(#@(i #@(l #@(p q))) q)
+  & @List/Cons ~ #@(#L(a #L(* #L(* #L(* a)))) #@(g #d(h #d(k o))))
+  & @List/Cons ~ #@(#L(* #L(b #L(* #L(* b)))) #@(f g))
+  & @List/Cons ~ #@(#L(* #L(* #L(c #L(* c)))) #@(e f))
+  & @List/Cons ~ #@(#L(* #L(* #L(* #L(d d)))) #@(@List/Nil e))
+  & @get ~ #@(@Nat/Zero #@(h i))
+  & @get ~ #@(j #@(k l))
+  & @Nat/Succ ~ #@(@Nat/Zero j)
+  & @get ~ #@(n #@(o p))
+  & @Nat/Succ ~ #@(m n)
+  & @Nat/Succ ~ #@(@Nat/Zero m)

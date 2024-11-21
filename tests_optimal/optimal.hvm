@@ -1,0 +1,139 @@
+@Bits/E = #L(a #L(* #L(* a)))
+
+@Bits/I = #L(a #L(* #L(* #L(#@(a b) b))))
+
+@Bits/O = #L(a #L(* #L(#@(a b) #L(* b))))
+
+@_12345 = n
+  & @i ~ #@(m n)
+  & @o ~ #@(l m)
+  & @o ~ #@(k l)
+  & @i ~ #@(j k)
+  & @i ~ #@(i j)
+  & @i ~ #@(h i)
+  & @o ~ #@(g h)
+  & @o ~ #@(f g)
+  & @o ~ #@(e f)
+  & @o ~ #@(d e)
+  & @o ~ #@(c d)
+  & @o ~ #@(b c)
+  & @i ~ #@(a b)
+  & @i ~ #@(@e a)
+
+@_64o = kc
+  & @o ~ #@(jc kc)
+  & @o ~ #@(ic jc)
+  & @o ~ #@(hc ic)
+  & @o ~ #@(gc hc)
+  & @o ~ #@(fc gc)
+  & @o ~ #@(ec fc)
+  & @o ~ #@(dc ec)
+  & @o ~ #@(cc dc)
+  & @o ~ #@(bc cc)
+  & @o ~ #@(ac bc)
+  & @o ~ #@(zb ac)
+  & @o ~ #@(yb zb)
+  & @o ~ #@(xb yb)
+  & @o ~ #@(wb xb)
+  & @o ~ #@(vb wb)
+  & @o ~ #@(ub vb)
+  & @o ~ #@(tb ub)
+  & @o ~ #@(sb tb)
+  & @o ~ #@(rb sb)
+  & @o ~ #@(qb rb)
+  & @o ~ #@(pb qb)
+  & @o ~ #@(ob pb)
+  & @o ~ #@(nb ob)
+  & @o ~ #@(mb nb)
+  & @o ~ #@(lb mb)
+  & @o ~ #@(kb lb)
+  & @o ~ #@(jb kb)
+  & @o ~ #@(ib jb)
+  & @o ~ #@(hb ib)
+  & @o ~ #@(gb hb)
+  & @o ~ #@(fb gb)
+  & @o ~ #@(eb fb)
+  & @o ~ #@(db eb)
+  & @o ~ #@(cb db)
+  & @o ~ #@(bb cb)
+  & @o ~ #@(ab bb)
+  & @o ~ #@(z ab)
+  & @o ~ #@(y z)
+  & @o ~ #@(x y)
+  & @o ~ #@(w x)
+  & @o ~ #@(v w)
+  & @o ~ #@(u v)
+  & @o ~ #@(t u)
+  & @o ~ #@(s t)
+  & @o ~ #@(r s)
+  & @o ~ #@(q r)
+  & @o ~ #@(p q)
+  & @o ~ #@(o p)
+  & @o ~ #@(n o)
+  & @o ~ #@(m n)
+  & @o ~ #@(l m)
+  & @o ~ #@(k l)
+  & @o ~ #@(j k)
+  & @o ~ #@(i j)
+  & @o ~ #@(h i)
+  & @o ~ #@(g h)
+  & @o ~ #@(f g)
+  & @o ~ #@(e f)
+  & @o ~ #@(d e)
+  & @o ~ #@(c d)
+  & @o ~ #@(b c)
+  & @o ~ #@(a b)
+  & @o ~ #@(@o a)
+
+@add = #L(#@(@add__C5 #@(@add__C4 #@(#L(a a) b))) b)
+
+@add__C0 = #L(b #L(a e))
+  & @o   ~ #@(d e)
+  & @inc ~ #@(c d)
+  & @add ~ #@(a #@(b c))
+
+@add__C1 = #L(b #L(a d))
+  & @i   ~ #@(c d)
+  & @add ~ #@(a #@(b c))
+
+@add__C2 = #L(b #L(a d))
+  & @i   ~ #@(c d)
+  & @add ~ #@(a #@(b c))
+
+@add__C3 = #L(b #L(a d))
+  & @o   ~ #@(c d)
+  & @add ~ #@(a #@(b c))
+
+@add__C4 = #L(a #L(#@(@add__C1 #@(@add__C0 #@(@e #@(a b)))) b))
+
+@add__C5 = #L(a #L(#@(@add__C3 #@(@add__C2 #@(@e #@(a b)))) b))
+
+@e = @Bits/E
+
+@i = @Bits/I
+
+@inc = #L(#@(@Bits/E #@(@inc__C1 #@(@inc__C0 a))) a)
+
+@inc__C0 = #L(a c)
+  & @Bits/O ~ #@(b c)
+  & @inc ~ #@(a b)
+
+@inc__C1 = #L(a b)
+  & @Bits/I ~ #@(a b)
+
+@main = a
+  & @mul ~ #@(@_12345 #@(@_12345 #E(a)))
+
+@mul = #L(a #L(b d))
+  & @sqr ~ #@(a #@(c #@(@_64o d)))
+  & @add ~ #@(b c)
+
+@o = @Bits/O
+
+@sqr = #L(#@(#L(* #L(a a)) #@(@sqr__C1 #@(@sqr__C0 #@(b #@(c d))))) #L(b #L(c d)))
+
+@sqr__C0 = #L(a #L(#d(#@(c d) #d(#@(b c) #@(e f))) #L(e g)))
+  & @sqr ~ #@(a #@(#L(b d) #@(f g)))
+
+@sqr__C1 = #L(a #L(#d(#@(c d) #@(b c)) #L(e f)))
+  & @sqr ~ #@(a #@(#L(b d) #@(e f)))
