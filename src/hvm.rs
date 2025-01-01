@@ -914,12 +914,14 @@ impl TMem {
     //let mut max_rlen = 0;
     //let mut max_nlen = 0;
     //let mut max_vlen = 0;
+    println!("{}\n\n", net.dump(&self.rbag));
 
     // Performs some interactions
     while self.rbag.len() > 0 {
       self.interact(net, book);
 
       // DEBUG:
+      println!("{}\n\n", net.dump(&self.rbag));
       //println!("{}{}", self.rbag.show(), net.show());
       //println!("");
       //let rlen = self.rbag.lo.len() + self.rbag.hi.len();
@@ -1069,6 +1071,68 @@ impl<'a> GNet<'a> {
     let root = self.vars_load(0x1FFFFFFF);
     s.push_str(&format!("ROOT | {} |\n", root.show()));
     s.push_str("==== | ============ |\n");
+    return s;
+  }
+
+  fn port2node(port: Port) -> String {
+    match port.get_tag() {
+      VAR => format!("VAR{:08X}", port.get_val()),
+      REF => format!("REF{:08X}", port.get_val()),
+      ERA => format!("ERA{:08X}", port.get_val()),
+      NUM => format!("NUM{:08X}", port.get_val()),
+      CON => format!("CON{:08X}", port.get_val()),
+      DUP => format!("DUP{:08X}", port.get_val()),
+      OPR => format!("OPR{:08X}", port.get_val()),
+      SWI => format!("SWI{:08X}", port.get_val()),
+      _   => panic!("Invalid tag"),
+    }
+  }
+
+  fn _dump(&self, port: Port) -> String {
+    let mut s = String::new();
+
+    if port.is_nod() {
+      let node = self.node_load(port.get_val() as usize);
+      s.push_str(&format!("{} [shape=triangle];\n", GNet::port2node(port)));
+      s.push_str(&format!("{} -> {};\n", GNet::port2node(port), GNet::port2node(node.get_fst())));
+      s.push_str(&format!("{} -> {};\n", GNet::port2node(port), GNet::port2node(node.get_snd())));
+      s.push_str(&self._dump(node.get_fst()));
+      s.push_str(&self._dump(node.get_snd()));
+    } else {
+      s.push_str(&format!("{};\n", GNet::port2node(port)));
+    }
+
+    return s;
+  }
+
+  pub fn dump(&self, rbag: &RBag) -> String {
+    let mut s = String::new();
+
+    s.push_str("digraph {\n");
+    s.push_str("edge [arrowhead=inv];\n");
+
+    s.push_str("{\n");
+    s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=red]; node [color=red];\n");
+    for pair in rbag.hi.iter() {
+      s.push_str(&format!("{} -> {};\n", GNet::port2node(pair.get_fst()), GNet::port2node(pair.get_snd())));
+    }
+    for pair in rbag.lo.iter() {
+      s.push_str(&format!("{} -> {};\n", GNet::port2node(pair.get_fst()), GNet::port2node(pair.get_snd())));
+    }
+    s.push_str("}\n");
+
+    for pair in rbag.hi.iter() {
+      s.push_str(&self._dump(pair.get_fst()));
+      s.push_str(&self._dump(pair.get_snd()));
+    }
+
+    for pair in rbag.lo.iter() {
+      s.push_str(&self._dump(pair.get_fst()));
+      s.push_str(&self._dump(pair.get_snd()));
+    }
+
+    s.push_str("}\n");
+
     return s;
   }
 }
