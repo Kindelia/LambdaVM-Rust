@@ -27,11 +27,12 @@ var graphviz = d3.select("#graph").graphviz()
     .transition(function () {
         return d3.transition("main")
             .ease(d3.easeLinear)
-            .duration(120);
+            .duration(200);
     })
     .logEvents(false)
     .width(div.clientWidth)
     .height(div.clientHeight)
+    .fit(false)
     .on("initEnd", render);
 
 window.addEventListener("keydown", function (e) {

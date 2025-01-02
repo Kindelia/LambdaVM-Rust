@@ -1099,25 +1099,6 @@ impl<'a> GNet<'a> {
     return var;
   }
 
-  fn _dump_var(&self, var: Port) -> String {
-    let mut s = String::new();
-
-    if var.get_tag() == VAR {
-      let index = var.get_val() as usize;
-      let val = Port(self.vars[index].0.load(Ordering::Relaxed));
-      s.push_str(&format!("{} -> {};\n", self.port2node_var(var, index), self.port2node_var(val, index)));
-      if val == NONE || val == Port(0) {
-        return s;
-      } else {
-        s.push_str(&self._dump_var(val));
-      }
-    } else {
-      s.push_str(&self._dump(var));
-    }
-
-    return s;
-  }
-
   fn _port2node(&self, port: Port, suffix: String) -> String {
     if port == NONE {
       return format!("NONE_{}", suffix);
@@ -1151,19 +1132,58 @@ impl<'a> GNet<'a> {
     return self._port2node(port, format!("unq{}", unsafe {unique.fetch_add(1, Ordering::Relaxed)}));
   }
 
+  fn decorate(&self, port: Port, id: String) -> String {
+    let tag = port.get_tag();
+    let val = port.get_val();
+
+    if port == NONE {
+      return format!("{} [shape=box, label=\"NONE\"];\n", id);
+    }
+
+    if port.is_nod() || port.is_var() {
+      return "".to_string();
+    }
+
+    if tag == NUM {
+      return format!("{} [shape=box, label=\"NUM {}\"];\n", id, crate::ast::Numb(Numb(val).0).show());
+    } else if tag == ERA {
+      return format!("{} [shape=star, label=\"ERA\"];\n", id);
+    } else if tag == REF {
+      //let fid = val & 0xFFFFFFF;
+      //let def = &book.defs[fid];
+      return format!("{} [shape=trapezium, label=\"REF\"];\n", id);
+    }
+
+    return "".to_string();
+  }
+
   fn _dump(&self, port: Port) -> String {
     let mut s = String::new();
 
     if port.is_nod() {
       let node = self.node_load(port.get_val() as usize);
       let parent = port.get_val();
-      s.push_str(&format!("{} [shape=triangle];\n", self.port2node(port)));
+      let tag = port.get_tag();
+      if tag == OPR {
+        s.push_str(&format!("{} [shape=triangle, label=\"{}\n{}\"];\n", self.port2node(port), crate::ast::Numb(Numb(node.get_fst().get_val()).0).show(), self.port2node(port)));
+      } else {
+        s.push_str(&format!("{} [shape=triangle, label=\"{}\"];\n", self.port2node(port), self.port2node(port)));
+      }
       s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_fst(), parent)));
       s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_snd(), parent)));
+      s.push_str(&self.decorate(node.get_fst(), self.port2node_parent(node.get_fst(), parent)));
       s.push_str(&self._dump(node.get_fst()));
+      s.push_str(&self.decorate(node.get_snd(), self.port2node_parent(node.get_snd(), parent)));
       s.push_str(&self._dump(node.get_snd()));
+
     } else if port.is_var() {
-      s.push_str(&self._dump_var(port));
+      let index = port.get_val() as usize;
+      let var = Port(self.vars[index].0.load(Ordering::Relaxed));
+      s.push_str(&format!("{} -> {};\n", self.port2node_var(port, index), self.port2node_var(var, index)));
+      s.push_str(&self.decorate(var, self.port2node_var(var, index)));
+      if var != NONE && var != Port(0) {
+        s.push_str(&self._dump(var));
+      }
     }
 
     return s;
@@ -1177,16 +1197,20 @@ impl<'a> GNet<'a> {
 
     s.push_str("{\n");
     s.push_str("edge [color=green]; node [color=green];\n");
-    s.push_str(&self._dump_var(ROOT));
+    s.push_str(&self._dump(ROOT));
     s.push_str("}\n");
 
     s.push_str("{\n");
     s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=red]; node [color=red];\n");
     for (i, pair) in rbag.hi.iter().enumerate() {
+      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i)));
+      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i)));
       s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
     }
     for (i, pair) in rbag.lo.iter().enumerate() {
-      s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i + 50), self.port2node_red(pair.get_snd(), i + 50)));
+      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i + 100)));
+      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i + 100)));
+      s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i + 100), self.port2node_red(pair.get_snd(), i + 100)));
     }
     s.push_str("}\n");
 
