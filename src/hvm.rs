@@ -918,14 +918,14 @@ impl TMem {
     //let mut max_nlen = 0;
     //let mut max_vlen = 0;
     s.push_str("var dots = [\n");
-    s.push_str(&format!("`{}`,\n", net.dump(&self.rbag)));
+    s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
 
     // Performs some interactions
     while self.rbag.len() > 0 {
       self.interact(net, book);
 
       // DEBUG:
-      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag)));
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
       //println!("{}{}", self.rbag.show(), net.show());
       //println!("");
       //let rlen = self.rbag.lo.len() + self.rbag.hi.len();
@@ -1132,7 +1132,7 @@ impl<'a> GNet<'a> {
     return self._port2node(port, format!("unq{}", unsafe {unique.fetch_add(1, Ordering::Relaxed)}));
   }
 
-  fn decorate(&self, port: Port, id: String) -> String {
+  fn decorate(&self, port: Port, id: String, book: &Book) -> String {
     let tag = port.get_tag();
     let val = port.get_val();
 
@@ -1149,15 +1149,15 @@ impl<'a> GNet<'a> {
     } else if tag == ERA {
       return format!("{} [shape=star, label=\"ERA\"];\n", id);
     } else if tag == REF {
-      //let fid = val & 0xFFFFFFF;
-      //let def = &book.defs[fid];
-      return format!("{} [shape=trapezium, label=\"REF\"];\n", id);
+      let fid = (val & 0xFFFFFFF) as usize;
+      let def: &Def = &book.defs[fid];
+      return format!("{} [shape=trapezium, label=\"REF {}\"];\n", id, def.name);
     }
 
     return "".to_string();
   }
 
-  fn _dump(&self, port: Port) -> String {
+  fn _dump(&self, port: Port, book: &Book) -> String {
     let mut s = String::new();
 
     if port.is_nod() {
@@ -1171,25 +1171,25 @@ impl<'a> GNet<'a> {
       }
       s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_fst(), parent)));
       s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_snd(), parent)));
-      s.push_str(&self.decorate(node.get_fst(), self.port2node_parent(node.get_fst(), parent)));
-      s.push_str(&self._dump(node.get_fst()));
-      s.push_str(&self.decorate(node.get_snd(), self.port2node_parent(node.get_snd(), parent)));
-      s.push_str(&self._dump(node.get_snd()));
+      s.push_str(&self.decorate(node.get_fst(), self.port2node_parent(node.get_fst(), parent), book));
+      s.push_str(&self._dump(node.get_fst(), book));
+      s.push_str(&self.decorate(node.get_snd(), self.port2node_parent(node.get_snd(), parent), book));
+      s.push_str(&self._dump(node.get_snd(), book));
 
     } else if port.is_var() {
       let index = port.get_val() as usize;
       let var = Port(self.vars[index].0.load(Ordering::Relaxed));
       s.push_str(&format!("{} -> {};\n", self.port2node_var(port, index), self.port2node_var(var, index)));
-      s.push_str(&self.decorate(var, self.port2node_var(var, index)));
+      s.push_str(&self.decorate(var, self.port2node_var(var, index), book));
       if var != NONE && var != Port(0) {
-        s.push_str(&self._dump(var));
+        s.push_str(&self._dump(var, book));
       }
     }
 
     return s;
   }
 
-  pub fn dump(&self, rbag: &RBag) -> String {
+  pub fn dump(&self, rbag: &RBag, book: &Book) -> String {
     let mut s = String::new();
 
     s.push_str("strict digraph {\n");
@@ -1197,31 +1197,31 @@ impl<'a> GNet<'a> {
 
     s.push_str("{\n");
     s.push_str("edge [color=green]; node [color=green];\n");
-    s.push_str(&self._dump(ROOT));
+    s.push_str(&self._dump(ROOT, book));
     s.push_str("}\n");
 
     s.push_str("{\n");
     s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=red]; node [color=red];\n");
     for (i, pair) in rbag.hi.iter().enumerate() {
-      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i)));
-      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i)));
+      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i), book));
+      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i), book));
       s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
     }
     for (i, pair) in rbag.lo.iter().enumerate() {
-      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i + 100)));
-      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i + 100)));
+      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i + 100), book));
+      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i + 100), book));
       s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i + 100), self.port2node_red(pair.get_snd(), i + 100)));
     }
     s.push_str("}\n");
 
     for pair in rbag.hi.iter() {
-      s.push_str(&self._dump(pair.get_fst()));
-      s.push_str(&self._dump(pair.get_snd()));
+      s.push_str(&self._dump(pair.get_fst(), book));
+      s.push_str(&self._dump(pair.get_snd(), book));
     }
 
     for pair in rbag.lo.iter() {
-      s.push_str(&self._dump(pair.get_fst()));
-      s.push_str(&self._dump(pair.get_snd()));
+      s.push_str(&self._dump(pair.get_fst(), book));
+      s.push_str(&self._dump(pair.get_snd(), book));
     }
 
     s.push_str("}\n");

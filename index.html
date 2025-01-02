@@ -33,6 +33,10 @@ var graphviz = d3.select("#graph").graphviz()
     .width(div.clientWidth)
     .height(div.clientHeight)
     .fit(false)
+    .tweenPaths(false)
+    .tweenShapes(false)
+    .growEnteringEdges(false)
+    .fade(true)
     .on("initEnd", render);
 
 window.addEventListener("keydown", function (e) {
