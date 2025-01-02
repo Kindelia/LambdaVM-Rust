@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::alloc::{alloc, dealloc, Layout};
 use std::mem;
+use std::fs;
 
 // Runtime
 // =======
@@ -907,6 +908,8 @@ impl TMem {
   }
 
   pub fn evaluator(&mut self, net: &GNet, book: &Book) {
+    let mut s = String::new();
+
     // Increments the tick
     self.tick += 1;
 
@@ -914,14 +917,15 @@ impl TMem {
     //let mut max_rlen = 0;
     //let mut max_nlen = 0;
     //let mut max_vlen = 0;
-    println!("{}\n\n", net.dump(&self.rbag));
+    s.push_str("var dots = [\n");
+    s.push_str(&format!("`{}`,\n", net.dump(&self.rbag)));
 
     // Performs some interactions
     while self.rbag.len() > 0 {
       self.interact(net, book);
 
       // DEBUG:
-      println!("{}\n\n", net.dump(&self.rbag));
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag)));
       //println!("{}{}", self.rbag.show(), net.show());
       //println!("");
       //let rlen = self.rbag.lo.len() + self.rbag.hi.len();
@@ -942,6 +946,9 @@ impl TMem {
       //max_vlen = max_vlen.max(vlen);
 
     }
+
+    s.push_str("]\n");
+    let _ = fs::write("dots.js", s);
 
     // DEBUG:
     //println!("MAX_RLEN: {}", max_rlen);
@@ -1046,6 +1053,8 @@ impl RBag {
   }
 }
 
+static mut unique: AtomicU32 = AtomicU32::new(0);
+
 impl<'a> GNet<'a> {
   pub fn show(&self) -> String {
     let mut s = String::new();
@@ -1074,12 +1083,50 @@ impl<'a> GNet<'a> {
     return s;
   }
 
-  fn port2node(port: Port) -> String {
+  fn myenter(&self, mut var: Port) -> Port {
+    while var.get_tag() == VAR {
+      //let val = self.vars_exchange(var.get_val() as usize, NONE);
+      let index = var.get_val() as usize;
+      let val = Port(self.vars[index].0.load(Ordering::Relaxed));
+      // If there was no `B'`, stop, as there is no extension
+      if val == NONE || val == Port(0) {
+        break;
+      }
+      // Otherwise, delete `B` (we own both) and continue as `A ~> B'`
+      //self.vars_take(var.get_val() as usize);
+      var = val;
+    }
+    return var;
+  }
+
+  fn _dump_var(&self, var: Port) -> String {
+    let mut s = String::new();
+
+    if var.get_tag() == VAR {
+      let index = var.get_val() as usize;
+      let val = Port(self.vars[index].0.load(Ordering::Relaxed));
+      s.push_str(&format!("{} -> {};\n", self.port2node_var(var, index), self.port2node_var(val, index)));
+      if val == NONE || val == Port(0) {
+        return s;
+      } else {
+        s.push_str(&self._dump_var(val));
+      }
+    } else {
+      s.push_str(&self._dump(var));
+    }
+
+    return s;
+  }
+
+  fn _port2node(&self, port: Port, suffix: String) -> String {
+    if port == NONE {
+      return format!("NONE_{}", suffix);
+    }
     match port.get_tag() {
       VAR => format!("VAR{:08X}", port.get_val()),
-      REF => format!("REF{:08X}", port.get_val()),
-      ERA => format!("ERA{:08X}", port.get_val()),
-      NUM => format!("NUM{:08X}", port.get_val()),
+      REF => format!("REF{:08X}_{}", port.get_val(), suffix),
+      ERA => format!("ERA{:08X}_{}", port.get_val(), suffix),
+      NUM => format!("NUM{:08X}_{}", port.get_val(), suffix),
       CON => format!("CON{:08X}", port.get_val()),
       DUP => format!("DUP{:08X}", port.get_val()),
       OPR => format!("OPR{:08X}", port.get_val()),
@@ -1088,18 +1135,35 @@ impl<'a> GNet<'a> {
     }
   }
 
+  fn port2node_parent(&self, port: Port, index: u32) -> String {
+    return self._port2node(port, format!("nod{}", index));
+  }
+
+  fn port2node_red(&self, port: Port, index: usize) -> String {
+    return self._port2node(port, format!("red{}", index));
+  }
+
+  fn port2node_var(&self, port: Port, index: usize) -> String {
+    return self._port2node(port, format!("var{}", index));
+  }
+
+  fn port2node(&self, port: Port) -> String {
+    return self._port2node(port, format!("unq{}", unsafe {unique.fetch_add(1, Ordering::Relaxed)}));
+  }
+
   fn _dump(&self, port: Port) -> String {
     let mut s = String::new();
 
     if port.is_nod() {
       let node = self.node_load(port.get_val() as usize);
-      s.push_str(&format!("{} [shape=triangle];\n", GNet::port2node(port)));
-      s.push_str(&format!("{} -> {};\n", GNet::port2node(port), GNet::port2node(node.get_fst())));
-      s.push_str(&format!("{} -> {};\n", GNet::port2node(port), GNet::port2node(node.get_snd())));
+      let parent = port.get_val();
+      s.push_str(&format!("{} [shape=triangle];\n", self.port2node(port)));
+      s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_fst(), parent)));
+      s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_snd(), parent)));
       s.push_str(&self._dump(node.get_fst()));
       s.push_str(&self._dump(node.get_snd()));
-    } else {
-      s.push_str(&format!("{};\n", GNet::port2node(port)));
+    } else if port.is_var() {
+      s.push_str(&self._dump_var(port));
     }
 
     return s;
@@ -1108,16 +1172,21 @@ impl<'a> GNet<'a> {
   pub fn dump(&self, rbag: &RBag) -> String {
     let mut s = String::new();
 
-    s.push_str("digraph {\n");
+    s.push_str("strict digraph {\n");
     s.push_str("edge [arrowhead=inv];\n");
 
     s.push_str("{\n");
+    s.push_str("edge [color=green]; node [color=green];\n");
+    s.push_str(&self._dump_var(ROOT));
+    s.push_str("}\n");
+
+    s.push_str("{\n");
     s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=red]; node [color=red];\n");
-    for pair in rbag.hi.iter() {
-      s.push_str(&format!("{} -> {};\n", GNet::port2node(pair.get_fst()), GNet::port2node(pair.get_snd())));
+    for (i, pair) in rbag.hi.iter().enumerate() {
+      s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
     }
-    for pair in rbag.lo.iter() {
-      s.push_str(&format!("{} -> {};\n", GNet::port2node(pair.get_fst()), GNet::port2node(pair.get_snd())));
+    for (i, pair) in rbag.lo.iter().enumerate() {
+      s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i + 50), self.port2node_red(pair.get_snd(), i + 50)));
     }
     s.push_str("}\n");
 
