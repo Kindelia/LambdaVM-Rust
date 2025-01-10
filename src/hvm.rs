@@ -1137,7 +1137,7 @@ impl<'a> GNet<'a> {
     let val = port.get_val();
 
     if port == NONE {
-      return format!("{} [shape=box, label=\"NONE\"];\n", id);
+      return format!("{} [shape=diamond, label=\"NONE\"];\n", id);
     }
 
     if port.is_nod() || port.is_var() {
@@ -1145,7 +1145,7 @@ impl<'a> GNet<'a> {
     }
 
     if tag == NUM {
-      return format!("{} [shape=box, label=\"NUM {}\"];\n", id, crate::ast::Numb(Numb(val).0).show());
+      return format!("{} [shape=diamond, label=\"NUM {}\"];\n", id, crate::ast::Numb(Numb(val).0).show());
     } else if tag == ERA {
       return format!("{} [shape=star, label=\"ERA\"];\n", id);
     } else if tag == REF {
