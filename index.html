@@ -13,7 +13,7 @@
         height: 100%;
     }
 </style>
-<script src="//d3js.org/d3.v7.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://unpkg.com/@hpcc-js/wasm@2.20.0/dist/graphviz.umd.js"></script>
 <script src="https://unpkg.com/d3-graphviz@5.6.0/build/d3-graphviz.js"></script>
 <script src="./dots.js"></script>
@@ -23,6 +23,7 @@
 const div = document.getElementById("graph");
 var offset = 0;
 var dotIndex = 0;
+readHash();
 var graphviz = d3.select("#graph").graphviz()
     .transition(function () {
         return d3.transition("main")
@@ -59,6 +60,20 @@ window.addEventListener("keyup", function (e) {
     offset = 0;
 });
 
+window.addEventListener("hashchange", function (e) {
+    readHash();
+    render();
+});
+
+function readHash() {
+    if (window.location.hash) {
+        dotIndex = parseInt(window.location.hash.slice(1), 10);
+        if (isNaN(dotIndex)) {
+            dotIndex = 0;
+        }
+    }
+}
+
 function render() {
     graphviz.renderDot(dots[dotIndex]);
     graphviz.on("end", update);
@@ -75,6 +90,7 @@ function update() {
     } else if (dotIndex >= dots.length) {
         dotIndex -= dots.length;
     }
+    window.location.hash = "#" + dotIndex;
     render();
 }
 
