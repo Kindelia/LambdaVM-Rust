@@ -1165,7 +1165,7 @@ impl<'a> GNet<'a> {
       let parent = port.get_val();
       let tag = port.get_tag();
       if tag == OPR {
-        s.push_str(&format!("{} [shape=triangle, label=\"{}\n{}\"];\n", self.port2node(port), crate::ast::Numb(Numb(node.get_fst().get_val()).0).show(), self.port2node(port)));
+        s.push_str(&format!("{} [shape=triangle, label=\"{}\\n{}\"];\n", self.port2node(port), crate::ast::Numb(Numb(node.get_fst().get_val()).0).show(), self.port2node(port)));
       } else {
         s.push_str(&format!("{} [shape=triangle, label=\"{}\"];\n", self.port2node(port), self.port2node(port)));
       }
@@ -1192,7 +1192,7 @@ impl<'a> GNet<'a> {
   pub fn dump(&self, rbag: &RBag, book: &Book) -> String {
     let mut s = String::new();
 
-    s.push_str("strict digraph {\n");
+    s.push_str("strict digraph { ordering=\"out\";\n");
     s.push_str("edge [arrowhead=inv];\n");
 
     s.push_str("{\n");
