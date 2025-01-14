@@ -83,8 +83,11 @@ pub const NONE : Port = Port(0xFFFFFFFF);
 
 // RBag
 pub struct RBag {
-  pub lo: Vec<Pair>,
   pub hi: Vec<Pair>,
+  pub gen: Vec<u32>,
+  pub cur_gen: u32,
+  pub queue: bool,
+  pub last_pop_idx: usize,
 }
 
 // Global Net
@@ -419,36 +422,37 @@ impl Numb {
 }
 
 impl RBag {
-  pub fn new() -> Self {
+  pub fn new(queue: bool) -> Self {
     RBag {
-      lo: Vec::new(),
       hi: Vec::new(),
+      gen: Vec::new(),
+      cur_gen: 0,
+      queue,
+      last_pop_idx: 0,
     }
   }
 
   pub fn push_redex(&mut self, redex: Pair) {
-    let rule = Port::get_rule(redex.get_fst(), redex.get_snd());
-    if Port::is_high_priority(rule) {
-      self.hi.push(redex);
-    } else {
-      self.lo.push(redex);
-    }
+    self.gen.push(self.cur_gen);
+    self.hi.push(redex);
   }
 
   pub fn pop_redex(&mut self) -> Option<Pair> {
     if !self.hi.is_empty() {
-      self.hi.pop()
+      self.last_pop_idx = self.hi.len() - 1;
+      let ret = if self.queue {self.hi.remove(0)} else {self.hi.pop().unwrap()};
+      let gen = if self.queue {self.gen.remove(0)} else {self.gen.pop().unwrap()};
+      if gen == self.cur_gen {
+        self.cur_gen += 1;
+      }
+      return Some(ret);
     } else {
-      self.lo.pop()
+      return None;
     }
   }
 
   pub fn len(&self) -> usize {
-    self.lo.len() + self.hi.len()
-  }
-
-  pub fn has_highs(&self) -> bool {
-    !self.hi.is_empty()
+    self.hi.len()
   }
 }
 
@@ -543,7 +547,7 @@ impl<'a> Drop for GNet<'a> {
 
 impl TMem {
   // TODO: implement a TMem::new() fn
-  pub fn new(tid: u32, tids: u32) -> Self {
+  pub fn new(tid: u32, tids: u32, queue: bool) -> Self {
     TMem {
       tid,
       tids,
@@ -553,7 +557,7 @@ impl TMem {
       vput: 0,
       nloc: vec![0; 0xFFF], // FIXME: move to a constant
       vloc: vec![0; 0xFFF],
-      rbag: RBag::new(),
+      rbag: RBag::new(queue),
     }
   }
 
@@ -1044,10 +1048,6 @@ impl RBag {
     for (i, pair) in self.hi.iter().enumerate() {
       s.push_str(&format!("{:04X} | {} | {}\n", i, pair.get_fst().show(), pair.get_snd().show()));
     }
-    s.push_str("~~~~ | ~~~~~~~~~~~~ | ~~~~~~~~~~~~\n");
-    for (i, pair) in self.lo.iter().enumerate() {
-      s.push_str(&format!("{:04X} | {} | {}\n", i + self.hi.len(), pair.get_fst().show(), pair.get_snd().show()));
-    }
     s.push_str("==== | ============ | ============\n");
     return s;
   }
@@ -1207,19 +1207,9 @@ impl<'a> GNet<'a> {
       s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i), book));
       s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
     }
-    for (i, pair) in rbag.lo.iter().enumerate() {
-      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i + 100), book));
-      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i + 100), book));
-      s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i + 100), self.port2node_red(pair.get_snd(), i + 100)));
-    }
     s.push_str("}\n");
 
     for pair in rbag.hi.iter() {
-      s.push_str(&self._dump(pair.get_fst(), book));
-      s.push_str(&self._dump(pair.get_snd(), book));
-    }
-
-    for pair in rbag.lo.iter() {
       s.push_str(&self._dump(pair.get_fst(), book));
       s.push_str(&self._dump(pair.get_snd(), book));
     }

@@ -162,7 +162,7 @@ pub fn run(book: &hvm::Book) {
   let net = hvm::GNet::new(1 << 29, 1 << 29);
 
   // Initializes threads
-  let mut tm = hvm::TMem::new(0, 1);
+  let mut tm = hvm::TMem::new(0, 1, false);
 
   // Creates an initial redex that calls main
   let main_id = book.defs.iter().position(|def| def.name == "main").unwrap();
