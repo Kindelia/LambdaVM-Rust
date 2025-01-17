@@ -454,6 +454,18 @@ impl RBag {
   pub fn len(&self) -> usize {
     self.hi.len()
   }
+
+  pub fn next_eval_idx(&self) -> Option<usize> {
+    if self.hi.len() == 0 {
+      return None;
+    }
+
+    if self.queue {
+      Some(0)
+    } else {
+      Some(self.hi.len() - 1)
+    }
+  }
 }
 
 impl<'a> GNet<'a> {
@@ -1201,8 +1213,22 @@ impl<'a> GNet<'a> {
     s.push_str("}\n");
 
     s.push_str("{\n");
+    s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=darkviolet]; node [color=darkviolet];\n");
+    {
+      let _i: Option<usize> = rbag.next_eval_idx();
+      if _i.is_some() {
+        let i = _i.unwrap();
+        let pair = &rbag.hi[i];
+        s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i), book));
+        s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i), book));
+        s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
+      }
+    }
     s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=red]; node [color=red];\n");
     for (i, pair) in rbag.hi.iter().enumerate() {
+      if i == rbag.next_eval_idx().unwrap() {
+        continue;
+      }
       s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i), book));
       s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i), book));
       s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
