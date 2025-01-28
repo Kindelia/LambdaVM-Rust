@@ -469,15 +469,15 @@ impl RBag {
     }
   }
 
-  pub fn peek_gen(&self) -> Option<u32> {
+  pub fn next_is_new_gen(&self) -> bool {
     if self.gen.len() == 0 {
-      return None;
+      return false;
     }
 
     if self.queue {
-      Some(self.gen[0])
+      return self.gen[0] == self.cur_gen;
     } else {
-      Some(self.gen[self.gen.len() -1])
+      return true;
     }
   }
 }
@@ -942,7 +942,6 @@ impl TMem {
   fn dump_pre(&mut self, net: &GNet, book: &Book) {
     if let Some(ref mut s) = self.dump {
       s.push_str("var dots = [\n");
-      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
     }
   }
 
@@ -962,8 +961,8 @@ impl TMem {
   }
 
   pub fn evaluator(&mut self, net: &GNet, book: &Book) {
-    let mut cur_gen: u32 = 0;
-    let mut sum_redex_per_gen: usize = self.rbag.len();
+    let mut gen_count: u32 = 1;
+    let mut sum_redex_per_gen: u64 = self.rbag.len() as u64;
 
     // Increments the tick
     self.tick += 1;
@@ -976,11 +975,10 @@ impl TMem {
 
     // Performs some interactions
     while self.rbag.len() > 0 {
-      let gen = self.rbag.peek_gen().unwrap();
-      if gen != cur_gen {
+      if self.rbag.next_is_new_gen() {
         self.dump(net, book);
-        cur_gen = gen;
-        sum_redex_per_gen += self.rbag.len();
+        gen_count += 1;
+        sum_redex_per_gen += self.rbag.len() as u64;
       }
 
       self.interact(net, book);
@@ -1017,7 +1015,7 @@ impl TMem {
     net.itrs.fetch_add(self.itrs as u64, Ordering::Relaxed);
     self.itrs = 0;
     if self.rbag.queue {
-      self.para = Some(sum_redex_per_gen as f64 / (cur_gen + 2) as f64);
+      self.para = Some(sum_redex_per_gen as f64 / gen_count as f64);
     }
   }
 }
