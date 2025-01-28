@@ -162,7 +162,7 @@ pub fn run(book: &hvm::Book) {
   let net = hvm::GNet::new(1 << 29, 1 << 29);
 
   // Initializes threads
-  let mut tm = hvm::TMem::new(0, 1, false);
+  let mut tm = hvm::TMem::new(0, 1, true);
 
   // Creates an initial redex that calls main
   let main_id = book.defs.iter().position(|def| def.name == "main").unwrap();
@@ -193,4 +193,7 @@ pub fn run(book: &hvm::Book) {
   println!("- ITRS: {}", itrs);
   println!("- TIME: {:.2}s", duration.as_secs_f64());
   println!("- MIPS: {:.2}", itrs as f64 / duration.as_secs_f64() / 1_000_000.0);
+  if tm.para.is_some() {
+    println!("- PARA: {:0.2}", tm.para.unwrap());
+  }
 }

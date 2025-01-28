@@ -105,6 +105,7 @@ pub struct TMem {
   pub tids: u32, // thread count
   pub tick: u32, // tick counter
   pub itrs: u32, // interaction count
+  pub para: Option<f64>, // parallelization factor
   pub nput: usize, // next node allocation index
   pub vput: usize, // next vars allocation index
   pub nloc: Vec<usize>, // allocated node locations
@@ -466,6 +467,18 @@ impl RBag {
       Some(self.hi.len() - 1)
     }
   }
+
+  pub fn peek_gen(&self) -> Option<u32> {
+    if self.gen.len() == 0 {
+      return None;
+    }
+
+    if self.queue {
+      Some(self.gen[0])
+    } else {
+      Some(self.gen[self.gen.len() -1])
+    }
+  }
 }
 
 impl<'a> GNet<'a> {
@@ -565,6 +578,7 @@ impl TMem {
       tids,
       tick: 0,
       itrs: 0,
+      para: None,
       nput: 0,
       vput: 0,
       nloc: vec![0; 0xFFF], // FIXME: move to a constant
@@ -925,6 +939,8 @@ impl TMem {
 
   pub fn evaluator(&mut self, net: &GNet, book: &Book) {
     let mut s = String::new();
+    let mut cur_gen: u32 = 0;
+    let mut sum_redex_per_gen: usize = self.rbag.len();
 
     // Increments the tick
     self.tick += 1;
@@ -938,10 +954,16 @@ impl TMem {
 
     // Performs some interactions
     while self.rbag.len() > 0 {
+      let gen = self.rbag.peek_gen().unwrap();
+      if gen != cur_gen {
+        s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+        cur_gen = gen;
+        sum_redex_per_gen += self.rbag.len();
+      }
+
       self.interact(net, book);
 
       // DEBUG:
-      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
       //println!("{}{}", self.rbag.show(), net.show());
       //println!("");
       //let rlen = self.rbag.lo.len() + self.rbag.hi.len();
@@ -963,6 +985,8 @@ impl TMem {
 
     }
 
+    s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+
     s.push_str("]\n");
     let _ = fs::write("dots.js", s);
 
@@ -973,6 +997,9 @@ impl TMem {
 
     net.itrs.fetch_add(self.itrs as u64, Ordering::Relaxed);
     self.itrs = 0;
+    if self.rbag.queue {
+      self.para = Some(sum_redex_per_gen as f64 / (cur_gen + 2) as f64);
+    }
   }
 }
 
