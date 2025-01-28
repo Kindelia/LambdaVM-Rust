@@ -1065,8 +1065,6 @@ impl RBag {
   }
 }
 
-static mut unique: AtomicU32 = AtomicU32::new(0);
-
 impl<'a> GNet<'a> {
   pub fn show(&self) -> String {
     let mut s = String::new();
@@ -1141,7 +1139,10 @@ impl<'a> GNet<'a> {
   }
 
   fn port2node(&self, port: Port) -> String {
-    return self._port2node(port, format!("unq{}", unsafe {unique.fetch_add(1, Ordering::Relaxed)}));
+    match port.get_tag() {
+        REF | ERA | VAR => panic!("No leaf nodes allowed"),
+        _ => self._port2node(port, "".to_string()),
+    }
   }
 
   fn decorate(&self, port: Port, id: String, book: &Book) -> String {
