@@ -106,6 +106,7 @@ pub struct TMem {
   pub tick: u32, // tick counter
   pub itrs: u32, // interaction count
   pub para: Option<f64>, // parallelization factor
+  pub dump: Option<String>, // graph dump output
   pub nput: usize, // next node allocation index
   pub vput: usize, // next vars allocation index
   pub nloc: Vec<usize>, // allocated node locations
@@ -572,13 +573,14 @@ impl<'a> Drop for GNet<'a> {
 
 impl TMem {
   // TODO: implement a TMem::new() fn
-  pub fn new(tid: u32, tids: u32, queue: bool) -> Self {
+  pub fn new(tid: u32, tids: u32, queue: bool, dump: bool) -> Self {
     TMem {
       tid,
       tids,
       tick: 0,
       itrs: 0,
       para: None,
+      dump: if dump {Some(String::new())} else {None},
       nput: 0,
       vput: 0,
       nloc: vec![0; 0xFFF], // FIXME: move to a constant
@@ -937,8 +939,29 @@ impl TMem {
     }
   }
 
+  fn dump_pre(&mut self, net: &GNet, book: &Book) {
+    if let Some(ref mut s) = self.dump {
+      s.push_str("var dots = [\n");
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+    }
+  }
+
+  fn dump_post(&mut self, net: &GNet, book: &Book) {
+    if let Some(ref mut s) = self.dump {
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+      s.push_str("]\n");
+
+      let _ = fs::write("dots.js", s);
+    }
+  }
+
+  fn dump(&mut self, net: &GNet, book: &Book) {
+    if let Some(ref mut s) = self.dump {
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+    }
+  }
+
   pub fn evaluator(&mut self, net: &GNet, book: &Book) {
-    let mut s = String::new();
     let mut cur_gen: u32 = 0;
     let mut sum_redex_per_gen: usize = self.rbag.len();
 
@@ -949,14 +972,13 @@ impl TMem {
     //let mut max_rlen = 0;
     //let mut max_nlen = 0;
     //let mut max_vlen = 0;
-    s.push_str("var dots = [\n");
-    s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+    self.dump_pre(net, book);
 
     // Performs some interactions
     while self.rbag.len() > 0 {
       let gen = self.rbag.peek_gen().unwrap();
       if gen != cur_gen {
-        s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+        self.dump(net, book);
         cur_gen = gen;
         sum_redex_per_gen += self.rbag.len();
       }
@@ -985,10 +1007,7 @@ impl TMem {
 
     }
 
-    s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
-
-    s.push_str("]\n");
-    let _ = fs::write("dots.js", s);
+    self.dump_post(net, book);
 
     // DEBUG:
     //println!("MAX_RLEN: {}", max_rlen);

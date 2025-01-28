@@ -28,7 +28,15 @@ fn main() {
     .subcommand(
       Command::new("run")
         .about("Interprets a file (using Rust)")
-        .arg(Arg::new("file").required(true)))
+        .arg(Arg::new("file").required(true))
+        .arg(Arg::new("dump")
+          .long("dump")
+          .action(ArgAction::SetTrue)
+          .help("Dump graph evaluation to dots.js"))
+        .arg(Arg::new("parallel")
+          .long("parallel")
+          .action(ArgAction::SetTrue)
+          .help("Act as if redexes are evaluated in parallel. Calculates a score of how parallel the graph evaluation is for the given program. Also useful for --dump.")))
     .subcommand(
       Command::new("run-c")
         .about("Interprets a file (using C)")
@@ -69,7 +77,7 @@ fn main() {
       let file = sub_matches.get_one::<String>("file").expect("required");
       let code = fs::read_to_string(file).expect("Unable to read file");
       let book = ast::Book::parse(&code).unwrap_or_else(|er| panic!("{}",er)).build();
-      run(&book);
+      run(&book, *sub_matches.get_one::<bool>("parallel").unwrap(), *sub_matches.get_one::<bool>("dump").unwrap());
     }
     Some(("run-c", sub_matches)) => {
       let file = sub_matches.get_one::<String>("file").expect("required");
@@ -157,12 +165,12 @@ fn main() {
   }
 }
 
-pub fn run(book: &hvm::Book) {
+pub fn run(book: &hvm::Book, parallel: bool, dump: bool) {
   // Initializes the global net
   let net = hvm::GNet::new(1 << 29, 1 << 29);
 
   // Initializes threads
-  let mut tm = hvm::TMem::new(0, 1, true);
+  let mut tm = hvm::TMem::new(0, 1, parallel, dump);
 
   // Creates an initial redex that calls main
   let main_id = book.defs.iter().position(|def| def.name == "main").unwrap();
