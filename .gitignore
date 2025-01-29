@@ -10,6 +10,7 @@ examples/**/main
 examples/**/*.c
 examples/**/*.cu
 .out.hvm
+dots.js
 
 # nix-direnv
 /.direnv/

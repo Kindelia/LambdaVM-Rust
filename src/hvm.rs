@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::alloc::{alloc, dealloc, Layout};
 use std::mem;
+use std::fs;
 
 // Runtime
 // =======
@@ -82,8 +83,11 @@ pub const NONE : Port = Port(0xFFFFFFFF);
 
 // RBag
 pub struct RBag {
-  pub lo: Vec<Pair>,
   pub hi: Vec<Pair>,
+  pub gen: Vec<u32>,
+  pub cur_gen: u32,
+  pub queue: bool,
+  pub last_pop_idx: usize,
 }
 
 // Global Net
@@ -101,6 +105,8 @@ pub struct TMem {
   pub tids: u32, // thread count
   pub tick: u32, // tick counter
   pub itrs: u32, // interaction count
+  pub para: Option<f64>, // parallelization factor
+  pub dump: Option<String>, // graph dump output
   pub nput: usize, // next node allocation index
   pub vput: usize, // next vars allocation index
   pub nloc: Vec<usize>, // allocated node locations
@@ -418,36 +424,61 @@ impl Numb {
 }
 
 impl RBag {
-  pub fn new() -> Self {
+  pub fn new(queue: bool) -> Self {
     RBag {
-      lo: Vec::new(),
       hi: Vec::new(),
+      gen: Vec::new(),
+      cur_gen: 0,
+      queue,
+      last_pop_idx: 0,
     }
   }
 
   pub fn push_redex(&mut self, redex: Pair) {
-    let rule = Port::get_rule(redex.get_fst(), redex.get_snd());
-    if Port::is_high_priority(rule) {
-      self.hi.push(redex);
-    } else {
-      self.lo.push(redex);
-    }
+    self.gen.push(self.cur_gen);
+    self.hi.push(redex);
   }
 
   pub fn pop_redex(&mut self) -> Option<Pair> {
     if !self.hi.is_empty() {
-      self.hi.pop()
+      self.last_pop_idx = self.hi.len() - 1;
+      let ret = if self.queue {self.hi.remove(0)} else {self.hi.pop().unwrap()};
+      let gen = if self.queue {self.gen.remove(0)} else {self.gen.pop().unwrap()};
+      if gen == self.cur_gen {
+        self.cur_gen += 1;
+      }
+      return Some(ret);
     } else {
-      self.lo.pop()
+      return None;
     }
   }
 
   pub fn len(&self) -> usize {
-    self.lo.len() + self.hi.len()
+    self.hi.len()
   }
 
-  pub fn has_highs(&self) -> bool {
-    !self.hi.is_empty()
+  pub fn next_eval_idx(&self) -> Option<usize> {
+    if self.hi.len() == 0 {
+      return None;
+    }
+
+    if self.queue {
+      Some(0)
+    } else {
+      Some(self.hi.len() - 1)
+    }
+  }
+
+  pub fn next_is_new_gen(&self) -> bool {
+    if self.gen.len() == 0 {
+      return false;
+    }
+
+    if self.queue {
+      return self.gen[0] == self.cur_gen;
+    } else {
+      return true;
+    }
   }
 }
 
@@ -542,17 +573,19 @@ impl<'a> Drop for GNet<'a> {
 
 impl TMem {
   // TODO: implement a TMem::new() fn
-  pub fn new(tid: u32, tids: u32) -> Self {
+  pub fn new(tid: u32, tids: u32, queue: bool, dump: bool) -> Self {
     TMem {
       tid,
       tids,
       tick: 0,
       itrs: 0,
+      para: None,
+      dump: if dump {Some(String::new())} else {None},
       nput: 0,
       vput: 0,
       nloc: vec![0; 0xFFF], // FIXME: move to a constant
       vloc: vec![0; 0xFFF],
-      rbag: RBag::new(),
+      rbag: RBag::new(queue),
     }
   }
 
@@ -906,7 +939,31 @@ impl TMem {
     }
   }
 
+  fn dump_pre(&mut self, net: &GNet, book: &Book) {
+    if let Some(ref mut s) = self.dump {
+      s.push_str("var dots = [\n");
+    }
+  }
+
+  fn dump_post(&mut self, net: &GNet, book: &Book) {
+    if let Some(ref mut s) = self.dump {
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+      s.push_str("]\n");
+
+      let _ = fs::write("dots.js", s);
+    }
+  }
+
+  fn dump(&mut self, net: &GNet, book: &Book) {
+    if let Some(ref mut s) = self.dump {
+      s.push_str(&format!("`{}`,\n", net.dump(&self.rbag, book)));
+    }
+  }
+
   pub fn evaluator(&mut self, net: &GNet, book: &Book) {
+    let mut gen_count: u32 = 1;
+    let mut sum_redex_per_gen: u64 = self.rbag.len() as u64;
+
     // Increments the tick
     self.tick += 1;
 
@@ -914,9 +971,16 @@ impl TMem {
     //let mut max_rlen = 0;
     //let mut max_nlen = 0;
     //let mut max_vlen = 0;
+    self.dump_pre(net, book);
 
     // Performs some interactions
     while self.rbag.len() > 0 {
+      if self.rbag.next_is_new_gen() {
+        self.dump(net, book);
+        gen_count += 1;
+        sum_redex_per_gen += self.rbag.len() as u64;
+      }
+
       self.interact(net, book);
 
       // DEBUG:
@@ -941,6 +1005,8 @@ impl TMem {
 
     }
 
+    self.dump_post(net, book);
+
     // DEBUG:
     //println!("MAX_RLEN: {}", max_rlen);
     //println!("MAX_NLEN: {}", max_nlen);
@@ -948,6 +1014,9 @@ impl TMem {
 
     net.itrs.fetch_add(self.itrs as u64, Ordering::Relaxed);
     self.itrs = 0;
+    if self.rbag.queue {
+      self.para = Some(sum_redex_per_gen as f64 / gen_count as f64);
+    }
   }
 }
 
@@ -1035,10 +1104,6 @@ impl RBag {
     for (i, pair) in self.hi.iter().enumerate() {
       s.push_str(&format!("{:04X} | {} | {}\n", i, pair.get_fst().show(), pair.get_snd().show()));
     }
-    s.push_str("~~~~ | ~~~~~~~~~~~~ | ~~~~~~~~~~~~\n");
-    for (i, pair) in self.lo.iter().enumerate() {
-      s.push_str(&format!("{:04X} | {} | {}\n", i + self.hi.len(), pair.get_fst().show(), pair.get_snd().show()));
-    }
     s.push_str("==== | ============ | ============\n");
     return s;
   }
@@ -1069,6 +1134,159 @@ impl<'a> GNet<'a> {
     let root = self.vars_load(0x1FFFFFFF);
     s.push_str(&format!("ROOT | {} |\n", root.show()));
     s.push_str("==== | ============ |\n");
+    return s;
+  }
+
+  fn myenter(&self, mut var: Port) -> Port {
+    while var.get_tag() == VAR {
+      //let val = self.vars_exchange(var.get_val() as usize, NONE);
+      let index = var.get_val() as usize;
+      let val = Port(self.vars[index].0.load(Ordering::Relaxed));
+      // If there was no `B'`, stop, as there is no extension
+      if val == NONE || val == Port(0) {
+        break;
+      }
+      // Otherwise, delete `B` (we own both) and continue as `A ~> B'`
+      //self.vars_take(var.get_val() as usize);
+      var = val;
+    }
+    return var;
+  }
+
+  fn _port2node(&self, port: Port, suffix: String) -> String {
+    if port == NONE {
+      return format!("NONE_{}", suffix);
+    }
+    match port.get_tag() {
+      VAR => format!("VAR{:08X}", port.get_val()),
+      REF => format!("REF{:08X}_{}", port.get_val(), suffix),
+      ERA => format!("ERA{:08X}_{}", port.get_val(), suffix),
+      NUM => format!("NUM{:08X}_{}", port.get_val(), suffix),
+      CON => format!("CON{:08X}", port.get_val()),
+      DUP => format!("DUP{:08X}", port.get_val()),
+      OPR => format!("OPR{:08X}", port.get_val()),
+      SWI => format!("SWI{:08X}", port.get_val()),
+      _   => panic!("Invalid tag"),
+    }
+  }
+
+  fn port2node_parent(&self, port: Port, index: u32) -> String {
+    return self._port2node(port, format!("nod{}", index));
+  }
+
+  fn port2node_red(&self, port: Port, index: usize) -> String {
+    return self._port2node(port, format!("red{}", index));
+  }
+
+  fn port2node_var(&self, port: Port, index: usize) -> String {
+    return self._port2node(port, format!("var{}", index));
+  }
+
+  fn port2node(&self, port: Port) -> String {
+    match port.get_tag() {
+        REF | ERA | VAR => panic!("No leaf nodes allowed"),
+        _ => self._port2node(port, "".to_string()),
+    }
+  }
+
+  fn decorate(&self, port: Port, id: String, book: &Book) -> String {
+    let tag = port.get_tag();
+    let val = port.get_val();
+
+    if port == NONE {
+      return format!("{} [shape=diamond, label=\"NONE\"];\n", id);
+    }
+
+    if port.is_nod() || port.is_var() {
+      return "".to_string();
+    }
+
+    if tag == NUM {
+      return format!("{} [shape=diamond, label=\"NUM {}\"];\n", id, crate::ast::Numb(Numb(val).0).show());
+    } else if tag == ERA {
+      return format!("{} [shape=star, label=\"ERA\"];\n", id);
+    } else if tag == REF {
+      let fid = (val & 0xFFFFFFF) as usize;
+      let def: &Def = &book.defs[fid];
+      return format!("{} [shape=trapezium, label=\"REF {}\"];\n", id, def.name);
+    }
+
+    return "".to_string();
+  }
+
+  fn _dump(&self, port: Port, book: &Book) -> String {
+    let mut s = String::new();
+
+    if port.is_nod() {
+      let node = self.node_load(port.get_val() as usize);
+      let parent = port.get_val();
+      let tag = port.get_tag();
+      if tag == OPR {
+        s.push_str(&format!("{} [shape=triangle, label=\"{}\\n{}\"];\n", self.port2node(port), crate::ast::Numb(Numb(node.get_fst().get_val()).0).show(), self.port2node(port)));
+      } else {
+        s.push_str(&format!("{} [shape=triangle, label=\"{}\"];\n", self.port2node(port), self.port2node(port)));
+      }
+      s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_fst(), parent)));
+      s.push_str(&format!("{} -> {};\n", self.port2node(port), self.port2node_parent(node.get_snd(), parent)));
+      s.push_str(&self.decorate(node.get_fst(), self.port2node_parent(node.get_fst(), parent), book));
+      s.push_str(&self._dump(node.get_fst(), book));
+      s.push_str(&self.decorate(node.get_snd(), self.port2node_parent(node.get_snd(), parent), book));
+      s.push_str(&self._dump(node.get_snd(), book));
+
+    } else if port.is_var() {
+      let index = port.get_val() as usize;
+      let var = Port(self.vars[index].0.load(Ordering::Relaxed));
+      s.push_str(&format!("{} -> {};\n", self.port2node_var(port, index), self.port2node_var(var, index)));
+      s.push_str(&self.decorate(var, self.port2node_var(var, index), book));
+      if var != NONE && var != Port(0) {
+        s.push_str(&self._dump(var, book));
+      }
+    }
+
+    return s;
+  }
+
+  pub fn dump(&self, rbag: &RBag, book: &Book) -> String {
+    let mut s = String::new();
+
+    s.push_str("strict digraph { ordering=\"out\";\n");
+    s.push_str("edge [arrowhead=inv];\n");
+
+    s.push_str("{\n");
+    s.push_str("edge [color=green]; node [color=green];\n");
+    s.push_str(&self._dump(ROOT, book));
+    s.push_str("}\n");
+
+    s.push_str("{\n");
+    s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=darkviolet]; node [color=darkviolet];\n");
+    {
+      let _i: Option<usize> = rbag.next_eval_idx();
+      if _i.is_some() {
+        let i = _i.unwrap();
+        let pair = &rbag.hi[i];
+        s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i), book));
+        s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i), book));
+        s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
+      }
+    }
+    s.push_str("edge [dir=both,arrowhead=inv,arrowtail=inv,color=red]; node [color=red];\n");
+    for (i, pair) in rbag.hi.iter().enumerate() {
+      if i == rbag.next_eval_idx().unwrap() {
+        continue;
+      }
+      s.push_str(&self.decorate(pair.get_fst(), self.port2node_red(pair.get_fst(), i), book));
+      s.push_str(&self.decorate(pair.get_snd(), self.port2node_red(pair.get_snd(), i), book));
+      s.push_str(&format!("{} -> {};\n", self.port2node_red(pair.get_fst(), i), self.port2node_red(pair.get_snd(), i)));
+    }
+    s.push_str("}\n");
+
+    for pair in rbag.hi.iter() {
+      s.push_str(&self._dump(pair.get_fst(), book));
+      s.push_str(&self._dump(pair.get_snd(), book));
+    }
+
+    s.push_str("}\n");
+
     return s;
   }
 }
