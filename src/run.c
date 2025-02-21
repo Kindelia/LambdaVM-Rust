@@ -143,8 +143,8 @@ Bytes readback_bytes(Net* net, Book* book, Port port) {
         if (ctr.args_len != 2) break;
         if (get_tag(ctr.args_buf[0]) != NUM) break;
 
-        if (bytes.len == capacity - 1) {
-          capacity *= 2;
+        if (bytes.len + 16 >= capacity) { // Grow in larger increments
+          capacity *= 2 + 128; // Avoid frequent realloc 
           bytes.buf = realloc(bytes.buf, capacity);
         }
 
